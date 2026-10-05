@@ -8,9 +8,9 @@
 - Iterations: **>10**
 
 ### Perfomances (ms; 100M rows)
-| lang | med | sd | min | max | 1B |
-|---|---|---|---|---|---|
-| **Zig** | 4580 | 35.98 | 4550 | 4660 | 45.75s |
+| lang | med | sd | min | max | 1B | link |
+|---|---|---|---|---|---|---|
+| **Zig** | 4580 | 35.98 | 4550 | 4660 | 45.75s | [Zig](zig/README.md) |
 
 
 ### Outputs
