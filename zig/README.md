@@ -6,9 +6,9 @@
   - `std.StringHashMapUnmanaged`
   - `f16` for min, avg, max
 ```zig
-  min    4550.00                                                                              
-  median 4580.00                                                                              
-  avg    4592.22                                                                                                                                                    
-  sd     35.98                                                                                
+  min    4550.00
+  median 4580.00
+  avg    4592.22
+  sd     35.98
   max    4660.00
 ```
