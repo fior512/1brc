@@ -20,7 +20,7 @@ max    4660.00
 
 
 
-**v2 (<hash>)** MMAP + SIMD newline:
+**v2 (7f14c3f)** MMAP + SIMD newline:
 - `mmap` (`MAP_POPULATE`) replaces the buffered `Io.Reader`
 - SIMD `\n` scan (`@Vector(V, u8)`) over the mapped buffer and scalar tail at EOF with `std..mem.indexOfScalarPos`
 - Average on output demand, instead of increamental. (Now just a sum and count)
