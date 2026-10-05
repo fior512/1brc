@@ -7,7 +7,7 @@ Run from `zig/`: `zig build -Doptimize=ReleaseFast && ./zig-out/bin/_1brc M` (da
 |---|---|---|---|---|---|---|---|---|
 | v1 | 6949426 | 4580.00 | 35.98 | 4550.00 | 4660.00 | - | - | textbook |
 | v2 | 7f14c3f | 3995.00 | 48.41 | 3940.00 | 4060.00 | -12.8% | -12.8% | mmap + SIMD `\n` |
-| v3 | <hash> | 2895.00 | 31.00 | 2830.00 | 2920.00 | -27.5% | -36.8% | fixed-point parse |
+| v3 | e038fed | 2895.00 | 31.00 | 2830.00 | 2920.00 | -27.5% | -36.8% | fixed-point parse |
 
 ## v1: Textbook
 **Change**
