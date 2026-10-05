@@ -10,40 +10,43 @@
 ### Perfomances (ms)
 | lang | med | sd | min | max |
 |---|---|---|---|---|
-| **Zig** | 78.97 | 0.582 | 78.45 | 80.55 |
+| **Zig** | 4580 | 35.98 | 4550 | 4660 |
 
 
 
 
 ### Outputs
 **ZIG**
+
 ```zig
-󰣇 training/zig/1brc ❯ sudo goset -n 1 -cgroup -steer -fence -interval 5 -- zig run src/main.zig
 ----------------- GOSET -----------------
 Selection
   cpu  sel  steer  non-steer  core  sibl  isol  numa  nohz  rcu
-    4   *       0        100   215    10           0
-   10   !       1        115   215     4           0
-    0   &       0        111   284     6           0
-    6         342        173   284     0           0
-    3           0        140   300     9           0
-    9           0        160   300     3           0
-    5           0        155   312    11           0
-   11           0        157   312     5           0
-    1           0        131   408     7           0
-    7          14        277   408     1           0
-    8           0        262   561     2           0
-    2           0        299   561     8           0
+    9   *       0         45   256     3           0
+    3   !       0        211   256     9           0
+    1   &       0          7   428     7           0
+    7           0        421   428     1           0
+    2          94        141   457     8           0
+    8           6        316   457     2           0
+    4           0         93   542    10           0
+   10           0        449   542     4           0
+    6           7        266   576     0           0
+    0           0        310   576     6           0
+   11           0        338   692     5           0
+    5         360        354   692    11           0
 
 Telemetry
   freq min  freq avg  freq max  irq steerable  irq non-steerable
-   5.27GHz   5.44GHz   5.45GHz              0                 30
+   4.69GHz   5.29GHz   5.40GHz              0              1.52k
 
 Run
-  task           sched             steer
-  poll   15@5ms  ctxsw vol      1  applied         40
-  wall  78.45ms  ctxsw invol    0  rejected        26
-  exit        0  migrations     0  remaining        0
-                 run_delay    0ns  drift            0
-                                   irqbalance  absent
+  task           sched                 steer
+  poll  914@5ms  ctxsw vol          1  applied         40
+  wall    4.57s  ctxsw invol       15  rejected        26
+  exit        0  migrations         1  remaining        1
+                 run_delay    63.52us  drift            0
+                                       irqbalance  absent
+
+  not reported: throttle
 ```
+> zig build -Doptimize=ReleaseFast && sudo goset -n 1 -cgroup -steer -fence --interval 5 -- ./zig-out/bin/_1brc
