@@ -1,6 +1,5 @@
 const std = @import("std");
 
-const DB = "./data/DB.txt";
 const V: comptime_int = 32; // bytes, 256bits (AVX)
 
 const Statistics = struct {
@@ -41,6 +40,13 @@ fn EscapeReversedIdx(line: []const u8) usize { // not null
 }
 
 pub fn main(init: std.process.Init) !void {
+    var args = init.minimal.args.iterate();
+    _ = args.next();
+    const arg = args.next() orelse "M";
+    const DB_size = if (arg[0] == 'M') "100M" else "1B";
+    const DB = try std.fmt.allocPrint(init.arena.allocator(), "./data/DB_{s}.txt", .{DB_size});
+
+
     const file = try std.Io.Dir.cwd().openFile(init.io, DB, .{});
     defer file.close(init.io);
 
@@ -67,14 +73,16 @@ pub fn main(init: std.process.Init) !void {
         gop.value_ptr.Do(temp);
     }
 
-    var c: usize = 0;
-    var it = stations.iterator();
-    while (it.next()) |entry| {
-        const stats = entry.value_ptr.*;
-        std.debug.print("[{s}] min:{d}, avg:{d}, max:{d}\n", .{ entry.key_ptr.*, stats.min, stats.avg, stats.max });
-        c += 1;
-        if (c >= 5) {
-            break;
+    if (false) {
+        var c: usize = 0;
+        var it = stations.iterator();
+        while (it.next()) |entry| {
+            const stats = entry.value_ptr.*;
+            std.debug.print("[{s}] min:{d}, avg:{d}, max:{d}\n", .{ entry.key_ptr.*, stats.min, stats.avg, stats.max });
+            c += 1;
+            if (c >= 5) {
+                break;
+            }
         }
     }
 }
