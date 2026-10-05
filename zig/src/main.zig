@@ -4,20 +4,31 @@ const V: comptime_int = 32; // bytes, 256bits (AVX)
 
 const Statistics = struct {
     count: i32 = 0,
-    min: f16 = std.math.inf(f16),
-    sum: f64 = 0,
-    max: f16 = -std.math.inf(f16),
+    min: i32 = std.math.maxInt(i32),
+    max: i32 = std.math.minInt(i32),
+    sum: i64 = 0,
 
-    pub fn Average(self: Statistics) f64 {
-        return self.sum / @as(f64, @floatFromInt(self.count));
-    }
-    pub fn Update(self: *Statistics, value: f16) void {
+    pub fn Update(self: *Statistics, value: i32) void {
         self.count += 1;
         self.min = @min(self.min, value);
         self.sum += value;
         self.max = @max(self.max, value);
     }
+    pub fn Average(self: Statistics) f64 {
+        return @as(f64, @floatFromInt(self.sum)) / @as(f64, @floatFromInt(self.count));
+    }
 };
+
+fn ParseTenthsFast(str: []const u8) i32 {
+    const is_negative: i32 = @intFromBool(str[0] == '-');
+    const number = str[@intCast(is_negative)..];
+    const len = number.len;
+
+    const hundreds_digit: i32 = if (len == 4) number[0] - '0' else 0;
+    const value = hundreds_digit * 100 + @as(i32, number[len - 3] - '0') * 10 + (number[len - 1] - '0');
+
+    return (value ^ -is_negative) + is_negative;
+}
 
 fn SemiReversedIdx(line: []const u8) usize { // not null
     const n = @min(line.len, V);
@@ -49,7 +60,7 @@ pub fn main(init: std.process.Init) !void {
     _ = args.next();
     const arg = args.next() orelse "M";
     const DB_size = if (arg[0] == 'M') "100M" else "1B";
-    const DB = try std.fmt.allocPrint(init.arena.allocator(), "./data/DB_{s}.txt", .{DB_size});
+    const DB = try std.fmt.allocPrint(init.arena.allocator(), "../data/DB_{s}.txt", .{DB_size});
 
     // FILE
     const file = try std.Io.Dir.cwd().openFile(init.io, DB, .{});
@@ -72,7 +83,7 @@ pub fn main(init: std.process.Init) !void {
 
         const separator: usize = SemiReversedIdx(line);
         const name = line[0..separator];
-        const temp = std.fmt.parseFloat(f16, line[(separator + 1)..]) catch continue;
+        const temp = ParseTenthsFast(line[(separator + 1)..]);
 
         const gop = try stations.getOrPut(init.gpa, name);
         if (!gop.found_existing) { // empty
@@ -87,7 +98,7 @@ pub fn main(init: std.process.Init) !void {
         var it = stations.iterator();
         while (it.next()) |entry| {
             const stats = entry.value_ptr.*;
-            std.debug.print("[{s}] min:{d}, avg:{d:.1}, max:{d}\n", .{ entry.key_ptr.*, stats.min, stats.Average(), stats.max });
+            std.debug.print("[{s}] min:{d}, avg:{d:.1}, max:{d}\n", .{ entry.key_ptr.*, @as(f32, @floatFromInt(stats.min)) / 10, stats.Average() / 10, @as(f32, @floatFromInt(stats.max)) / 10 });
             c += 1;
             if (c >= 5) {
                 break;
