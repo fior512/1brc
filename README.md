@@ -7,12 +7,10 @@
 - Run: `sudo goset -n 1 -cgroup -steer -fence -interval 5`
 - Iterations: **>10**
 
-### Perfomances (ms)
-| lang | med | sd | min | max |
-|---|---|---|---|---|
-| **Zig** | 4580 | 35.98 | 4550 | 4660 |
-
-
+### Perfomances (ms; 100M rows)
+| lang | med | sd | min | max | 1B |
+|---|---|---|---|---|---|
+| **Zig** | 4580 | 35.98 | 4550 | 4660 | 45.75s |
 
 
 ### Outputs
