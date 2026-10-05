@@ -5,29 +5,21 @@ const V: comptime_int = 32; // bytes, 256bits (AVX)
 const Statistics = struct {
     count: i32 = 0,
     min: f16 = std.math.inf(f16),
-    avg: f16 = 0,
+    sum: f64 = 0,
     max: f16 = -std.math.inf(f16),
 
-    pub fn Average(self: *Statistics, new: f16) void {
-        const n: f16 = @floatFromInt(self.count);
-        self.avg = (new + self.avg) / n;
+    pub fn Average(self: Statistics) f64 {
+        return self.sum / @as(f64, @floatFromInt(self.count));
     }
-    pub fn Min(self: *Statistics, new: f16) void {
-        self.min = @min(self.min, new);
-    }
-    pub fn Max(self: *Statistics, new: f16) void {
-        self.max = @max(self.max, new);
-    }
-
-    pub fn Do(self: *Statistics, value: f16) void {
+    pub fn Update(self: *Statistics, value: f16) void {
         self.count += 1;
-        self.Min(value);
-        self.Average(value);
-        self.Max(value);
+        self.min = @min(self.min, value);
+        self.sum += value;
+        self.max = @max(self.max, value);
     }
 };
 
-fn EscapeReversedIdx(line: []const u8) usize { // not null
+fn SemiReversedIdx(line: []const u8) usize { // not null
     const n = @min(line.len, V);
     var buf: [V]u8 = @splat(0);
     @memcpy(buf[(V - n)..], line[(line.len - n)..]);
@@ -39,28 +31,46 @@ fn EscapeReversedIdx(line: []const u8) usize { // not null
     return line.len + @as(usize, @ctz(mask)) - V; //ctz count backward
 }
 
+fn NLIdx(buf: []const u8, pos: usize) usize {
+    //TODO: decomp is unrolled n%V or cmp+jmp
+    const nl: @Vector(V, u8) = @splat('\n');
+    var p = pos;
+    while (p + V <= buf.len) : (p += V) {
+        const chunk: @Vector(V, u8) = buf[p..][0..V].*;
+        const m: std.meta.Int(.unsigned, V) = @bitCast(chunk == nl);
+        if (m != 0) return p + @ctz(m);
+    }
+    return std.mem.indexOfScalarPos(u8, buf, p, '\n') orelse buf.len;
+}
+
 pub fn main(init: std.process.Init) !void {
+    // FALGS
     var args = init.minimal.args.iterate();
     _ = args.next();
     const arg = args.next() orelse "M";
     const DB_size = if (arg[0] == 'M') "100M" else "1B";
     const DB = try std.fmt.allocPrint(init.arena.allocator(), "./data/DB_{s}.txt", .{DB_size});
 
-
+    // FILE
     const file = try std.Io.Dir.cwd().openFile(init.io, DB, .{});
     defer file.close(init.io);
 
-    var reader_buf: [6 * 1024]u8 = undefined;
-    var reader = file.reader(init.io, &reader_buf);
-    const stdin = &reader.interface;
+    // MMAP
+    const size = (try file.stat(init.io)).size;
+    const buf = try std.posix.mmap(null, size, .{ .READ = true }, .{ .TYPE = .PRIVATE, .POPULATE = true }, file.handle, 0);
+    defer std.posix.munmap(buf);
 
+    // HASH
     var stations: std.StringHashMapUnmanaged(Statistics) = .empty;
     defer stations.deinit(init.gpa);
 
-    while (try stdin.takeDelimiter('\n')) |line| {
-        if (line[0] == '#') continue; // 2 first lines are comments
+    var start: usize = 0;
+    while (start < buf.len) {
+        const nl: usize = NLIdx(buf, start);
+        defer start = nl + 1;
+        const line = buf[start..nl];
 
-        const separator: usize = EscapeReversedIdx(line);
+        const separator: usize = SemiReversedIdx(line);
         const name = line[0..separator];
         const temp = std.fmt.parseFloat(f16, line[(separator + 1)..]) catch continue;
 
@@ -69,8 +79,7 @@ pub fn main(init: std.process.Init) !void {
             gop.key_ptr.* = try init.arena.allocator().dupe(u8, name);
             gop.value_ptr.* = .{};
         }
-
-        gop.value_ptr.Do(temp);
+        gop.value_ptr.Update(temp);
     }
 
     if (false) {
@@ -78,7 +87,7 @@ pub fn main(init: std.process.Init) !void {
         var it = stations.iterator();
         while (it.next()) |entry| {
             const stats = entry.value_ptr.*;
-            std.debug.print("[{s}] min:{d}, avg:{d}, max:{d}\n", .{ entry.key_ptr.*, stats.min, stats.avg, stats.max });
+            std.debug.print("[{s}] min:{d}, avg:{d:.1}, max:{d}\n", .{ entry.key_ptr.*, stats.min, stats.Average(), stats.max });
             c += 1;
             if (c >= 5) {
                 break;
