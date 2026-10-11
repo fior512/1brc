@@ -1,31 +1,47 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
-const V: comptime_int = 32; // bytes, 256bits (AVX)
+inline fn MARK(comptime comment: []const u8) void {
+    const prefix = switch (builtin.cpu.arch) {
+        .x86, .x86_16, .x86_64, .riscv32, .riscv64 => "# ",
+        .aarch64, .aarch64_be, .arm, .armeb, .thumb, .thumbeb => "// ",
+        else => @compileError("MARK: unsupported architecture: {s}" ++ @tagName(builtin.cpu.arch)),
+    };
+    asm volatile (prefix ++ comment ::: .{});
+}
 
-const Statistics = struct {
+const V: comptime_int = 32; // bytes (AVX)
+
+const Entry = struct {
+    key: []const u8 = &.{},
+
+    hash: u64 = 0,
+    sum: i64 = 0,
     count: i32 = 0,
     min: i32 = std.math.maxInt(i32),
     max: i32 = std.math.minInt(i32),
-    sum: i64 = 0,
 
-    pub fn Update(self: *Statistics, value: i32) void {
+    pub fn Update(self: *Entry, value: i32) void {
         self.count += 1;
         self.min = @min(self.min, value);
         self.sum += value;
         self.max = @max(self.max, value);
     }
-    pub fn Average(self: Statistics) f64 {
+    pub fn Average(self: Entry) f64 {
         return @as(f64, @floatFromInt(self.sum)) / @as(f64, @floatFromInt(self.count));
     }
 };
 
-fn ParseTenthsFast(str: []const u8) i32 {
+fn ParseTenths(str: []const u8) i32 {
     const is_negative: i32 = @intFromBool(str[0] == '-');
     const number = str[@intCast(is_negative)..];
     const len = number.len;
 
     const hundreds_digit: i32 = if (len == 4) number[0] - '0' else 0;
-    const value = hundreds_digit * 100 + @as(i32, number[len - 3] - '0') * 10 + (number[len - 1] - '0');
+    const value = hundreds_digit * 100 + @as(
+        i32,
+        number[len - 3] - '0',
+    ) * 10 + (number[len - 1] - '0');
 
     return (value ^ -is_negative) + is_negative;
 }
@@ -54,6 +70,36 @@ fn NLIdx(buf: []const u8, pos: usize) usize {
     return std.mem.indexOfScalarPos(u8, buf, p, '\n') orelse buf.len;
 }
 
+
+//i tried:
+// - ctx
+// - complet custom hashmap
+// - wyhash and custom hashing
+
+// const SLOTS = 1 << 16;
+// var map: [SLOTS]Entry = [_]Entry{.{}} ** SLOTS;
+//
+// inline fn lookup(key: []const u8, h: u64) *Entry {
+//     var i: usize = @intCast(h & (SLOTS - 1));
+//     while (true) : (i = (i + 1) & (SLOTS - 1)) {
+//         const e = &map[i];
+//         if (e.key.len == 0) { // empty slot
+//             e.key = key; // slice into the mmap'd file
+//             e.hash = h;
+//             return e;
+//         }
+//         if (e.hash == h and std.mem.eql(u8, e.key, key)) return e;
+//     }
+// }
+//
+//inline fn hashing(word: []const u8) u64 {
+//    const n: usize = @min(8, word.len);
+//    const shift: u6 = @intCast(64 - 8 * n);
+//    const iword = std.mem.readInt(u64, word.ptr[0..8], .little);
+//    const prefix = iword & (~@as(u64, 0) >> shift);
+//    return prefix *% 0x9E3779B97F4A7C15;
+//}
+
 pub fn main(init: std.process.Init) !void {
     // FALGS
     var args = init.minimal.args.iterate();
@@ -61,6 +107,7 @@ pub fn main(init: std.process.Init) !void {
     const arg = args.next() orelse "M";
     const DB_size = if (arg[0] == 'M') "100M" else "1B";
     const DB = try std.fmt.allocPrint(init.arena.allocator(), "../data/DB_{s}.txt", .{DB_size});
+    const mode = args.next() orelse ""; // print [p]
 
     // FILE
     const file = try std.Io.Dir.cwd().openFile(init.io, DB, .{});
@@ -68,22 +115,30 @@ pub fn main(init: std.process.Init) !void {
 
     // MMAP
     const size = (try file.stat(init.io)).size;
-    const buf = try std.posix.mmap(null, size, .{ .READ = true }, .{ .TYPE = .PRIVATE, .POPULATE = true }, file.handle, 0);
+    const buf = try std.posix.mmap(
+        null,
+        size,
+        .{ .READ = true },
+        .{ .TYPE = .PRIVATE, .POPULATE = true },
+        file.handle,
+        0,
+    );
     defer std.posix.munmap(buf);
 
     // HASH
-    var stations: std.StringHashMapUnmanaged(Statistics) = .empty;
+    var stations: std.StringHashMapUnmanaged(Entry) = .empty;
     defer stations.deinit(init.gpa);
 
     var start: usize = 0;
     while (start < buf.len) {
         const nl: usize = NLIdx(buf, start);
+
         defer start = nl + 1;
         const line = buf[start..nl];
 
         const separator: usize = SemiReversedIdx(line);
         const name = line[0..separator];
-        const temp = ParseTenthsFast(line[(separator + 1)..]);
+        const temp = ParseTenths(line[(separator + 1)..]);
 
         const gop = try stations.getOrPut(init.gpa, name);
         if (!gop.found_existing) { // empty
@@ -91,14 +146,25 @@ pub fn main(init: std.process.Init) !void {
             gop.value_ptr.* = .{};
         }
         gop.value_ptr.Update(temp);
+        //gop.value_ptr.Update(temp);
+        //const hash = hashing(name);
+        //std.hash.Wyhash.hash(0, name[0..@min(8, name.len)]);
+        //lookup(name, hash).Update(temp);
     }
 
-    if (false) {
+    if (std.mem.eql(u8, mode, "p")) { //mode:const, so translate
         var c: usize = 0;
         var it = stations.iterator();
         while (it.next()) |entry| {
-            const stats = entry.value_ptr.*;
-            std.debug.print("[{s}] min:{d}, avg:{d:.1}, max:{d}\n", .{ entry.key_ptr.*, @as(f32, @floatFromInt(stats.min)) / 10, stats.Average() / 10, @as(f32, @floatFromInt(stats.max)) / 10 });
+            std.debug.print(
+                "[{s}] min:{d}, avg:{d:.1}, max:{d}\n",
+                .{
+                    entry.key_ptr.*,
+                    @as(f32, @floatFromInt(entry.value_ptr.min)) / 10,
+                    entry.value_ptr.Average() / 10,
+                    @as(f32, @floatFromInt(entry.value_ptr.max)) / 10,
+                },
+            );
             c += 1;
             if (c >= 5) {
                 break;
