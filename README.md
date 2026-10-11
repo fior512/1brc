@@ -45,5 +45,8 @@ Run
                    run_delay    149.27us  drift            0
                                           irqbalance  absent
 ```
-> zig build -Doptimize=ReleaseFast
-> sudo goset -n 1 -cgroup -steer -fence --interval 1 -- ./zig-out/bin/_1brc B
+
+```zig
+zig build -Doptimize=ReleaseFast
+sudo goset -n 1 -cgroup -steer -fence --interval 1 -- ./zig-out/bin/_1brc B
+```
