@@ -77,8 +77,6 @@ fn NLIdx(buf: []const u8, pos: usize) usize {
     return std.mem.indexOfScalarPos(u8, buf, p, '\n') orelse buf.len;
 }
 
-const Parsed = struct { temp: i32, len: usize }; // len: bytes from temp start to next
-
 // line is always [100]u8;-?d?.d\n
 // merykitty's solution
 const ParsedTemp = struct {
