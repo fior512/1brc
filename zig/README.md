@@ -8,6 +8,7 @@ Run from `zig/`: `zig build -Doptimize=ReleaseFast && ./zig-out/bin/_1brc M` (da
 | v1 | 6949426 | 4580.00 | 35.98 | 4550.00 | 4660.00 | - | - | textbook |
 | v2 | 7f14c3f | 3995.00 | 48.41 | 3940.00 | 4060.00 | -12.8% | -12.8% | mmap + SIMD `\n` |
 | v3 | e038fed | 2895.00 | 31.00 | 2830.00 | 2920.00 | -27.5% | -36.8% | fixed-point parse |
+| v4 | | 1530.00 | 12.65 | 1500.00 | 1540.00 | -47.2% | -66.6% | merykitty's SWAR |
 
 ## v1: Textbook
 **Change**
@@ -41,3 +42,17 @@ Run from `zig/`: `zig build -Doptimize=ReleaseFast && ./zig-out/bin/_1brc M` (da
 - `memcpyFast` 9.1%: runtime-length `@memcpy` in `SemiReversedIdx` (size dispatch `cmp $0x3f`)
 - `Wyhash.hash` 8.9%: generic hash for short names
 - Instructions 26.7G (267 per row, was 561); IPC 1.8; branch-miss rate 4.0% (135M, 1.35 per row); L1d miss 4.8% (479M, 4.8 per row)
+
+
+## v4: Merykitty's SWAR
+**Change**
+- `SemiIdx` (`src/main.zig`): SIMD `;` search with a direct vector load (no `memcpy`); scalar `indexOfScalarPos` fallback for names >= 32 B
+- `parseDataPoint` (`src/main.zig`): SWAR temperature parse from one `u64` load; sign, dot position and digits decoded with bit masks and a magic multiply, no per-byte branches
+
+**Profile** (ReleaseFast, `perf record`)
+- `HashMapUnmanaged.getOrPut`: 50.0%
+- `mem.eql`: 18.9%
+- `Wyhash.hash`: 12.1%
+- `start.posixCallMainAndExit` (main body, inlined SWAR parse + `SemiIdx`): 14.8%
+- Kernel (page faults from mmap): ~2.4%
+- Hash map lookup + key compare: ~81% of samples

@@ -46,7 +46,14 @@ fn ParseTenths(str: []const u8) i32 {
     return (value ^ -is_negative) + is_negative;
 }
 
-fn SemiReversedIdx(line: []const u8) usize { // not null
+inline fn SemiIdx(buf: []const u8, start: usize) usize { // BODY: no EOL assumption
+    const v: @Vector(V, u8) = buf.ptr[start..][0..V].*; // direct load (no memcpy)
+    const semi: @Vector(V, u8) = @splat(';');
+    const mask: std.meta.Int(.unsigned, V) = @bitCast(v == semi);
+    if (mask != 0) return start + @ctz(mask); // first ';' after start
+    return std.mem.indexOfScalarPos(u8, buf, start + V, ';').?; // name ≥ 32 B (rare)
+}
+fn SemiReversedIdx(line: []const u8) usize { // TAIL: assume known EOL
     const n = @min(line.len, V);
     var buf: [V]u8 = @splat(0);
     @memcpy(buf[(V - n)..], line[(line.len - n)..]);
@@ -70,35 +77,27 @@ fn NLIdx(buf: []const u8, pos: usize) usize {
     return std.mem.indexOfScalarPos(u8, buf, p, '\n') orelse buf.len;
 }
 
+const Parsed = struct { temp: i32, len: usize }; // len: bytes from temp start to next
 
-//i tried:
-// - ctx
-// - complet custom hashmap
-// - wyhash and custom hashing
+// line is always [100]u8;-?d?.d\n
+// merykitty's solution
+const ParsedTemp = struct {
+    temp: i32,
+    len: usize,
+};
 
-// const SLOTS = 1 << 16;
-// var map: [SLOTS]Entry = [_]Entry{.{}} ** SLOTS;
-//
-// inline fn lookup(key: []const u8, h: u64) *Entry {
-//     var i: usize = @intCast(h & (SLOTS - 1));
-//     while (true) : (i = (i + 1) & (SLOTS - 1)) {
-//         const e = &map[i];
-//         if (e.key.len == 0) { // empty slot
-//             e.key = key; // slice into the mmap'd file
-//             e.hash = h;
-//             return e;
-//         }
-//         if (e.hash == h and std.mem.eql(u8, e.key, key)) return e;
-//     }
-// }
-//
-//inline fn hashing(word: []const u8) u64 {
-//    const n: usize = @min(8, word.len);
-//    const shift: u6 = @intCast(64 - 8 * n);
-//    const iword = std.mem.readInt(u64, word.ptr[0..8], .little);
-//    const prefix = iword & (~@as(u64, 0) >> shift);
-//    return prefix *% 0x9E3779B97F4A7C15;
-//}
+const MAGIC_MULTIPLIER: u64 = 100 * 0x1000000 + 10 * 0x10000 + 1; // 0x640A0001
+inline fn parseDataPoint(word: u64) ParsedTemp {
+    const negated = ~word;
+    const sign: i64 = @as(i64, @bitCast(negated << 59)) >> 63; // -1 if '-', else 0
+    const sign_u: u64 = @bitCast(sign);
+    const without_sign = word & ~(sign_u & 0xFF);
+    const dot: u6 = @intCast(@ctz(negated & 0x10101000)); //detecting DOT at byte 12, 20, 28
+    const aligned = without_sign << @intCast(28 - @as(u32, dot));
+    const digits = aligned & 0x0F000F0F00; // ASCII to digit mask
+    const abs: i64 = @intCast(((digits *% MAGIC_MULTIPLIER) >> 32) & 0x3FF);
+    return .{ .temp = @intCast((abs ^ sign) - sign), .len = (dot >> 3) + 3 };
+}
 
 pub fn main(init: std.process.Init) !void {
     // FALGS
@@ -130,15 +129,36 @@ pub fn main(init: std.process.Init) !void {
     defer stations.deinit(init.gpa);
 
     var start: usize = 0;
+    const fast_end = if (buf.len > 128) buf.len - 128 else 0;
+
+    // BODY
+    MARK("BODY_start");
+    while (start < fast_end) {
+        const sep = SemiIdx(buf, start);
+        const name = buf[start..sep];
+        const word = std.mem.readInt(u64, buf.ptr[sep + 1 ..][0..8], .little);
+        const p = parseDataPoint(word);
+
+        const gop = try stations.getOrPut(init.gpa, name);
+        if (!gop.found_existing) { // empty
+            gop.key_ptr.* = try init.arena.allocator().dupe(u8, name);
+            gop.value_ptr.* = .{};
+        }
+        gop.value_ptr.Update(p.temp);
+
+        start = sep + 1 + p.len;
+    }
+    MARK("BODY_end");
+
+    // TAIL
     while (start < buf.len) {
-        const nl: usize = NLIdx(buf, start);
-
+        const nl = NLIdx(buf, start);
         defer start = nl + 1;
-        const line = buf[start..nl];
 
-        const separator: usize = SemiReversedIdx(line);
-        const name = line[0..separator];
-        const temp = ParseTenths(line[(separator + 1)..]);
+        const line = buf[start..nl];
+        const sep = SemiReversedIdx(line);
+        const name = line[0..sep];
+        const temp = ParseTenths(line[sep + 1 ..]);
 
         const gop = try stations.getOrPut(init.gpa, name);
         if (!gop.found_existing) { // empty
@@ -146,10 +166,6 @@ pub fn main(init: std.process.Init) !void {
             gop.value_ptr.* = .{};
         }
         gop.value_ptr.Update(temp);
-        //gop.value_ptr.Update(temp);
-        //const hash = hashing(name);
-        //std.hash.Wyhash.hash(0, name[0..@min(8, name.len)]);
-        //lookup(name, hash).Update(temp);
     }
 
     if (std.mem.eql(u8, mode, "p")) { //mode:const, so translate
