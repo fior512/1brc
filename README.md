@@ -6,11 +6,12 @@
 - Machine state: `watchcub bench --pinfreq=off --cstate=keep`
 - Run: `sudo goset -n 1 -cgroup -steer -fence -interval 5`
 - Iterations: **>10**
+- Multithreading: 8 threads
 
 ### Perfomances (ms; 100M rows)
 | lang | med | sd | min | max | 1B | link |
 |---|---|---|---|---|---|---|
-| **Zig** | 1530.00 | 12.65 | 1500.00 | 1540.00 | 14.89s | [Zig](zig/README.md) |
+| **Zig** | 391.74 | 9.14 | 387.31 | 419.07 | 3.72s | [Zig](zig/README.md) |
 
 
 ### Outputs
@@ -20,30 +21,38 @@
 ----------------- GOSET -----------------
 Selection
   cpu  sel  steer  non-steer  core  sibl  isol  numa  nohz  rcu
-   10   *       0         52   184     4           0
-    4   !       0        132   184    10           0
-    9   &       0         40   186     3           0
-    3           0        146   186     9           0
-    5           0         89   193    11           0
-   11           0        104   193     5           0
-    2           0         53   313     8           0
-    8           0        260   313     2           0
-    6           0        135   489     0           0
-    0         218        354   489     6           0
-    7           0         73   525     1           0
-    1           0        452   525     7           0
+    4   *       0        165   333    10           0
+   10   *       0        168   333     4           0
+    0   *       0        206   451     6           0
+    6   *       0        245   451     0           0
+    2   *       0        257   523     8           0
+    8   *       0        266   523     2           0
+    9   *     308        249   533     3           0
+    3   *       1        284   533     9           0
+    7   &       0        256   543     1           0
+    1           1        287   543     7           0
+   11           0        252   581     5           0
+    5           0        329   581    11           0
 
 Telemetry
-  freq min  freq avg  freq max  throttle count  irq steerable  irq non-steerable
-   4.35GHz   5.30GHz   5.43GHz               0              0              5.66k
+  cpu  freq min  freq avg  freq max  throttle count  irq steerable  irq non-steerable
+  0     4.67GHz   4.67GHz   4.68GHz               0              0              1.50k
+  2     4.67GHz   4.67GHz   4.68GHz               0              0              1.28k
+  3     4.67GHz   4.67GHz   4.68GHz               0              0              1.35k
+  4     4.67GHz   4.67GHz   4.68GHz               0              0              1.22k
+  6     4.67GHz   4.67GHz   4.68GHz               0              0              1.33k
+  8     4.67GHz   4.67GHz   4.68GHz               0              0              1.21k
+  9     4.67GHz   4.67GHz   4.68GHz               0              0              1.26k
+  10    4.67GHz   4.67GHz   4.68GHz               0              0              1.17k
+  all   4.67GHz   4.67GHz   4.68GHz               0              0              10.3k
 
 Run
-  task             sched                  steer
-  poll  14820@1ms  ctxsw vol           1  applied         40
-  wall     14.89s  ctxsw invol        32  rejected        26
-  exit          0  migrations          1  remaining        0
-                   run_delay    149.27us  drift            0
-                                          irqbalance  absent
+  task            sched                steer
+  poll  3544@1ms  ctxsw vol        24  applied         40
+  wall     3.72s  ctxsw invol     567  rejected        26
+  exit         0  migrations        4  remaining        1
+                  run_delay    1.33ms  drift            0
+                                       irqbalance  absent
 ```
 
 ```zig

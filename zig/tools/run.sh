@@ -1,6 +1,6 @@
 cd "$(dirname "$0")/.." || exit 1
 zig build -Doptimize=ReleaseFast && sudo -v && for i in $(seq 10); do
-    sudo goset -n 1 -cgroup -steer -fence --interval 5 -- ./zig-out/bin/_1brc M
+    sudo goset -n 8 -cgroup -steer -fence --interval 5 -- ./zig-out/bin/_1brc M
     sleep 5
 done 2>&1 | tee out.txt
 
