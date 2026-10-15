@@ -8,7 +8,7 @@ Run from `zig/`: `zig build -Doptimize=ReleaseFast -Dcpu=native` then `sudo gose
 | v2 | 7f14c3f | 3995.00 | 48.41 | 3940.00 | 4060.00 | -12.8% | -12.8% | mmap + SIMD `\n` |
 | v3 | e038fed | 2895.00 | 31.00 | 2830.00 | 2920.00 | -27.5% | -36.8% | fixed-point parse |
 | v4 | 95f2118 | 1530.00 | 12.65 | 1500.00 | 1540.00 | -47.2% | -66.6% | merykitty's SWAR |
-| v5 | 362acff | 391.74 | 9.14 | 387.31 | 419.07 | -74.39 | -91.44% | threadpool |
+| v5 | 362acff | 391.74 | 9.14 | 387.31 | 419.07 | -74.39% | -91.44% | threadpool |
 
 ## v1: Textbook
 **Change**
