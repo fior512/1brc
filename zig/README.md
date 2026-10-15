@@ -1,7 +1,6 @@
 # Zig
 
-Run from `zig/`: `zig build -Doptimize=ReleaseFast && ./zig-out/bin/_1brc M` (data: `../data/DB_*.txt`)
-
+Run from `zig/`: `zig build -Doptimize=ReleaseFast -Dcpu=native` then `sudo goset -n 8 -cgroup -fence -steer --interval 1 -- ./zig-out/bin/_1brc B "" 8`
 ## Summary (ms, 100M rows)
 | ver | commit | med | sd | min | max | vs prev | vs v1 | aspects |
 |---|---|---|---|---|---|---|---|---|
@@ -9,6 +8,7 @@ Run from `zig/`: `zig build -Doptimize=ReleaseFast && ./zig-out/bin/_1brc M` (da
 | v2 | 7f14c3f | 3995.00 | 48.41 | 3940.00 | 4060.00 | -12.8% | -12.8% | mmap + SIMD `\n` |
 | v3 | e038fed | 2895.00 | 31.00 | 2830.00 | 2920.00 | -27.5% | -36.8% | fixed-point parse |
 | v4 | 95f2118 | 1530.00 | 12.65 | 1500.00 | 1540.00 | -47.2% | -66.6% | merykitty's SWAR |
+| v5 | 362acff | 391.74 | 9.14 | 387.31 | 419.07 | -74.39 | -91.44% | threadpool |
 
 ## v1: Textbook
 **Change**
@@ -56,3 +56,19 @@ Run from `zig/`: `zig build -Doptimize=ReleaseFast && ./zig-out/bin/_1brc M` (da
 - `start.posixCallMainAndExit` (main body, inlined SWAR parse + `SemiIdx`): 14.8%
 - Kernel (page faults from mmap): ~2.4%
 - Hash map lookup + key compare: ~81% of samples
+
+
+## v5: Threadpool
+**Change**
+- `std.Thread.spawn` pool with arena, one hashmap per thread, merging hashmap at once with `Entry.Fuse()`
+- Custom `Ctx` hash/eql replaces std `StringHashMapUnmanaged`/Wyhash for `HashMapUnmanaged()`. hash = first 8 bytes as LE u64 (zero-padded for short keys) `^` len, multiply `0x9E3779B97F4A7C15`, fold high bits down for the map's low-bit index
+- `getOrPutAssumeCapacity` after `ensureTotalCapacity(arena, 1 << 15)`: hot loop does no growth/rehash; keys duped into per-thread arena
+- `flags()` parse binary arguments for readability
+
+**Profile** (ReleaseFast, `perf record`)
+- `HashMapUnmanaged.getOrPutAssumeCapacityAdapted`: 51.8%
+- `Thread.callFn`: 30.3%
+- `mem.eql`: 14.3%, key compare on every hash hit
+- mmap page faults: ~1.2% (`follow_page_pte` + `__get_user_pages` + `__pte_offset_map_lock`)
+- Hash map lookup + key compare: ~66% of samples
+
