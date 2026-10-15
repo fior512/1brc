@@ -61,9 +61,9 @@ Run from `zig/`: `zig build -Doptimize=ReleaseFast -Dcpu=native` then `sudo gose
 ## v5: Threadpool
 **Change**
 - `std.Thread.spawn` pool with arena, one hashmap per thread, merging hashmap at once with `Entry.Fuse()`
-- Custom `Ctx` hash/eql replaces std `StringHashMapUnmanaged`/Wyhash: `HashMapUnmanaged()` (`src/main.zig:15`); hash = first 8 bytes as LE u64 (zero-padded for short keys) `^` len, multiply `0x9E3779B97F4A7C15`, fold high bits down for the map's low-bit index
+- Custom `Ctx` hash/eql replaces std `StringHashMapUnmanaged`/Wyhash for `HashMapUnmanaged()`. hash = first 8 bytes as LE u64 (zero-padded for short keys) `^` len, multiply `0x9E3779B97F4A7C15`, fold high bits down for the map's low-bit index
 - `getOrPutAssumeCapacity` after `ensureTotalCapacity(arena, 1 << 15)`: hot loop does no growth/rehash; keys duped into per-thread arena
-- `flags()` parser (`src/main.zig:176`): M/1B dataset, optional `p` print, thread count (default 8)
+- `flags()` parse binary arguments for readability
 
 **Profile** (ReleaseFast, `perf record`)
 - `HashMapUnmanaged.getOrPutAssumeCapacityAdapted`: 51.8%
