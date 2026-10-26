@@ -77,7 +77,7 @@ inline fn SemiIdx(buf: []const u8, start: usize) usize { // BODY: no EOL assumpt
     return std.mem.indexOfScalarPos(u8, buf, start + V, ';').?; // name ≥ 32 B (rare)
 }
 
-fn SemiReversedIdx(line: []const u8) usize { // TAIL: assume known EOL
+inline fn SemiReversedIdx(line: []const u8) usize { // TAIL: assume known EOL
     const n = @min(line.len, V);
     var buf: [V]u8 = @splat(0);
     @memcpy(buf[(V - n)..], line[(line.len - n)..]);
@@ -89,7 +89,7 @@ fn SemiReversedIdx(line: []const u8) usize { // TAIL: assume known EOL
     return line.len + @as(usize, @ctz(mask)) - V; //ctz count backward
 }
 
-fn NLIdx(buf: []const u8, pos: usize) usize {
+inline fn NLIdx(buf: []const u8, pos: usize) usize {
     //TODO: decomp is unrolled n%V or cmp+jmp
     const nl: @Vector(V, u8) = @splat('\n');
     var p = pos;
@@ -162,33 +162,49 @@ inline fn parseDataPoint(vec: u64) struct {
     temp: i32,
     len: usize,
 } {
-    const negated = ~vec;
-    const sign: i64 = @as(i64, @bitCast(negated << 59)) >> 63; // -1 if '-', else 0
-    const sign_u: u64 = @bitCast(sign);
-    const without_sign = vec & ~(sign_u & 0xFF);
-    const dot: u6 = @intCast(@ctz(negated & 0x10101000)); //detecting DOT at byte 12, 20, 28
-    const aligned = without_sign << @intCast(28 - @as(u32, dot));
-    const digits = aligned & 0x0F000F0F00; // ASCII to digit mask
-    const abs: i64 = @intCast(((digits *% MAGIC_MULTIPLIER) >> 32) & 0x3FF);
+    const negated = ~vec; 
+    const sign: i64 = @as(i64, @bitCast(negated << 59)) >> 63; // byte 1 is `-`(0010 1101) || `0-9`(0011 xxxx)
+                                                               // bit 4: differenciator
+                                                               // ~vec: because negative is represented as activated bit (see it as `sign = ~(vec[4]);`)
+                                                               //`>>63` is arithmetic so it @splat(bit_sign)
+    const sign_u: u64 = @bitCast(sign); // digits:0x00.. (which act as positive); `-`:0xFF..
+    const without_sign = vec & ~(sign_u & 0xFF); // if(pos) {0x00.. ->& 0x00.. ->~ 0xFF.. ->& full vec} 
+                                                      // else {0xFF.. ->& 0x00..FF ->~ 0xFF..00 ->& vec except *LE* byte(`-`)}
+    const dot: u6 = @intCast(@ctz(negated & 0x10101000)); //detect dot, only byte 1, 2 or 3 (x.x, -x.x|xx.x, -xx.x)
+                                                          //0x10101000: check {bit 12 ([1][4]), bit 20 ([2][4]) and bit 28 ([3][4])}
+    const aligned = without_sign << @intCast(28 - @as(u32, dot)); // 12|20|28 - 28 = 16|8|0 -> shift to place dot at byte 3 (to handle xx.x and x.xx agnostically)
+    const digits = aligned & 0x0F000F0F00; // take only the low-nibble of digits byte only
+                                                // because 0-9 in ASCII is `0011 xxxx`, where xxxx is the digit
+                                                // `-12.4` -> `124`
+    const abs: i64 = @intCast(((digits *% MAGIC_MULTIPLIER) >> 32) & 0x3FF); //MAGIC_MULTIPLIER:
+                                                                             //       100 * 0x1000000:  T + 2^8     (1byte)
+                                                                             //     + 10 * 0x10000:     U + 2^16    (2bytes)
+                                                                             //     + 1:                F + 2^32    (4bytes)
+                                                                             //     MAGIC is here to make T, U and F meet at F place
+                                                                             //
+                                                                             //     multiply creates junk
+                                                                             //     values are somewhere in the middle bits
+                                                                             //     >>32 clamp low junk 
+                                                                             //     &3FF clamp high junk (11 1111 1111)
     return .{ .temp = @intCast((abs ^ sign) - sign), .len = (dot >> 3) + 3 };
 }
 
 pub fn flags(args: anytype, arena: std.mem.Allocator) !struct { //TODO:find iterator type
-    DB: []const u8,
+    csv: []const u8,
     print: []const u8,
     threads: u32,
 } {
     var it = args;
     _ = it.next();
     const arg = it.next() orelse "M";
-    const DB_size = if (arg.len > 0 and arg[0] == 'M') "100M" else "1B";
-    const DB = try std.fmt.allocPrint(arena, "../data/DB_{s}.txt", .{DB_size});
+    const csv_size = if (arg.len > 0 and arg[0] == 'M') "100M" else "1B";
+    const csv = try std.fmt.allocPrint(arena, "../data/DB_{s}.txt", .{csv_size});
     const print = it.next() orelse "";
     const threads_arg = it.next() orelse "8";
     const threads = try std.fmt.parseInt(u32, threads_arg, 10);
 
     return .{
-        .DB = DB,
+        .csv = csv,
         .print = print,
         .threads = threads,
     };
@@ -199,7 +215,7 @@ pub fn main(init: std.process.Init) !void {
     const args = try flags(init.minimal.args.iterate(), init.arena.allocator());
 
     // FILE
-    const file = try std.Io.Dir.cwd().openFile(init.io, args.DB, .{});
+    const file = try std.Io.Dir.cwd().openFile(init.io, args.csv, .{});
     defer file.close(init.io);
 
     //MMAP
@@ -215,7 +231,6 @@ pub fn main(init: std.process.Init) !void {
         0,
     );
     defer std.posix.munmap(whole);
-
 
     // Multi HOTPATH
     const handles = try init.arena.allocator().alloc(std.Thread, args.threads);
