@@ -55,7 +55,7 @@ const Entry = struct {
     }
 };
 
-fn ParseTenths(str: []const u8) i32 {
+inline fn ParseTenths(str: []const u8) i32 {
     const is_negative: i32 = @intFromBool(str[0] == '-');
     const number = str[@intCast(is_negative)..];
     const len = number.len;
@@ -155,7 +155,7 @@ inline fn worker(
 }
 
 // vec;
-// line is always [100]u8;-?d?.d\n
+// line is always []u8;-?d?.d\n
 // merykitty's solution
 const MAGIC_MULTIPLIER: u64 = 100 * 0x1000000 + 10 * 0x10000 + 1; // 0x640A0001
 inline fn parseDataPoint(vec: u64) struct {
@@ -183,9 +183,10 @@ inline fn parseDataPoint(vec: u64) struct {
                                                                              //     MAGIC is here to make T, U and F meet at F place
                                                                              //
                                                                              //     multiply creates junk
-                                                                             //     values are somewhere in the middle bits
-                                                                             //     >>32 clamp low junk 
-                                                                             //     &3FF clamp high junk (11 1111 1111)
+                                                                             //     our value is somewhere in the middle bits
+                                                                             //     value e[0;999] -> u10(1024)
+                                                                             //     since aligned dot at byte 3 (big endian side) we have a u64 with top half occupied
+                                                                             //     >>32 shift value from top to bottom half, then 0x3FF(11 1111 1111; 10bit) select the value from it
     return .{ .temp = @intCast((abs ^ sign) - sign), .len = (dot >> 3) + 3 };
 }
 
