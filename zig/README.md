@@ -8,7 +8,9 @@ Run from `zig/`: `zig build -Doptimize=ReleaseFast -Dcpu=native` then `sudo gose
 | v2 | 7f14c3f | 3995.00 | 48.41 | 3940.00 | 4060.00 | -12.8% | -12.8% | mmap + SIMD `\n` |
 | v3 | e038fed | 2895.00 | 31.00 | 2830.00 | 2920.00 | -27.5% | -36.8% | fixed-point parse |
 | v4 | 95f2118 | 1530.00 | 12.65 | 1500.00 | 1540.00 | -47.2% | -66.6% | merykitty's SWAR |
-| v5 | 362acff | 391.74 | 9.14 | 387.31 | 419.07 | -74.39% | -91.44% | threadpool |
+| v5 | 362acff | 391.74 | 9.14 | 387.31 | 419.07 | -74.40% | -91.45% | threadpool |
+| v6 |  | 253.25 | 0.89 | 251.49 | 254.21 | -35.35% | -94.47% | AoS linear probing |
+
 
 ## v1: Textbook
 **Change**
@@ -65,10 +67,21 @@ Run from `zig/`: `zig build -Doptimize=ReleaseFast -Dcpu=native` then `sudo gose
 - `getOrPutAssumeCapacity` after `ensureTotalCapacity(arena, 1 << 15)`: hot loop does no growth/rehash; keys duped into per-thread arena
 - `flags()` parse binary arguments for readability
 
-**Profile** (ReleaseFast, `perf record`)
+**Profile**
 - `HashMapUnmanaged.getOrPutAssumeCapacityAdapted`: 51.8%
 - `Thread.callFn`: 30.3%
 - `mem.eql`: 14.3%, key compare on every hash hit
 - mmap page faults: ~1.2% (`follow_page_pte` + `__get_user_pages` + `__pte_offset_map_lock`)
 - Hash map lookup + key compare: ~66% of samples
 
+## v6: AoS linear probing
+**Change**
+- `Table` replaces `HashMapUnmanaged`: `[32768]Slot` AoS, 64B aligned, linear probing, fixed size(no alloc; which was in hotpath due to dupe and hashmap size).
+- `Slot.pword` points in mmap with fast hash from v5
+- `eqlKey` with 3 sizes (>=16, >=8, >=4) to let it vectorize (memcpy, @vector)
+
+**Profile**
+- `parseDataPoint` 29.6%, `eqlKey` 29.5%, stats update 18.2% (diagnostics 6.5% of it), `SemiIdx` 11.2%, hash 8.5%
+- Per row: 99.8 instructions, IPC 1.19, 0.86 branch misses, 1.36 L1d misses
+- Top-down: SMT contention 32.3% (goset's strategy), backend memory 28.5%, mispredicts 7.0%
+- `llvm-mca` ideal 26.7 cycles per row vs 83.6 measured

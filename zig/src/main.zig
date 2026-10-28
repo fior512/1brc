@@ -1,8 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const V: comptime_int = 32; // bytes (AVX)
-
 inline fn MARK(comptime comment: []const u8) void {
     const prefix = switch (builtin.cpu.arch) {
         .x86, .x86_16, .x86_64, .riscv32, .riscv64 => "# ",
@@ -12,46 +10,140 @@ inline fn MARK(comptime comment: []const u8) void {
     asm volatile (prefix ++ comment ::: .{});
 }
 
-const Map = std.HashMapUnmanaged([]const u8, Entry, Ctx, 50);
-const Buf = []align(std.heap.page_size_min) u8;
-const Ctx = struct {
-    pub fn hash(_: Ctx, k: []const u8) u64 {
-        const w: u64 = if (k.len >= 8)
-            std.mem.readInt(u64, k[0..8], .little)
-        else blk: {
-            var t: u64 = 0;
-            for (k, 0..) |c, i| t |= @as(u64, c) << @intCast(8 * i);
-            break :blk t;
-        };
-        const h = (w ^ k.len) *% 0x9E3779B97F4A7C15;
-        return h ^ (h >> 32); // fold high bits down: std map indexes with LOW bits
-    }
-    pub fn eql(_: Ctx, a: []const u8, b: []const u8) bool {
-        return std.mem.eql(u8, a, b);
-    }
+const V: comptime_int = 32; // bytes (AVX)
+
+const TABLE_BITS = 15;
+const TABLE_SLOTS = 1 << TABLE_BITS;
+const Slot = struct {
+    pword: [*]const u8,
+    pword_len: u64,
+    sum: i64,
+    count: i32,
+    min: i32,
+    max: i32,
+
+    probe_total: u64, // lifetime
+    probe_max: u64, // single sequence
+    lookup_count: u64, // calls
 };
 
-const Entry = struct {
-    sum: i64 = 0,
-    count: i32 = 0,
-    min: i32 = std.math.maxInt(i32),
-    max: i32 = std.math.minInt(i32),
+const Table = struct {
+    // AoS with linear probing instead of HM.
+    // - Compile time size, no alloc
+    // - fixed size words with fast path-prefix
+    // - cheap hash
+    // - SIMD pword comparison
+    slots: []Slot, //AoS
 
-    pub fn Update(self: *Entry, value: i32) void {
-        self.count += 1;
-        self.min = @min(self.min, value);
-        self.sum += value;
-        self.max = @max(self.max, value);
-    }
-    pub fn Average(self: Entry) f64 {
-        return @as(f64, @floatFromInt(self.sum)) / @as(f64, @floatFromInt(self.count));
+    fn init(arena: std.mem.Allocator) !Table {
+        const slots = try arena.alignedAlloc(Slot, .@"64", TABLE_SLOTS);
+        // .@"64" is an enum litteral for alignement size, @ is here to allow names starting with number
+        @memset(std.mem.sliceAsBytes(slots), 0);
+        return .{ .slots = slots };
     }
 
-    pub fn Fuse(self: *Entry, sub: Entry) void {
-        self.count += sub.count;
-        self.min = @min(self.min, sub.min);
-        self.sum += sub.sum;
-        self.max = @max(self.max, sub.max);
+    inline fn hash(word: u64, len: usize) u64 {
+        //(1+ sqrt(5))/2 = @as(u64, 1.6180339887)
+        return (word ^ len) *% 0x9E3779B97F4A7C15;
+    }
+
+    inline fn eqlKey(a: [*]const u8, b: [*]const u8, len: usize) bool {
+        if (len >= 16) {
+            var i: usize = 0;
+            while (i + 16 < len) : (i += 16) {
+                const x: @Vector(16, u8) = a[i..][0..16].*;
+                const y: @Vector(16, u8) = b[i..][0..16].*;
+                if (!@reduce(.And, x == y)) return false;
+            }
+            const x: @Vector(16, u8) = a[len - 16 ..][0..16].*;
+            const y: @Vector(16, u8) = b[len - 16 ..][0..16].*;
+            return @reduce(.And, x == y);
+        }
+        if (len >= 8) {
+            const x0 = std.mem.readInt(u64, a[0..8], .little);
+            const y0 = std.mem.readInt(u64, b[0..8], .little);
+            const x1 = std.mem.readInt(u64, a[len - 8 ..][0..8], .little);
+            const y1 = std.mem.readInt(u64, b[len - 8 ..][0..8], .little);
+            return (x0 == y0) and (x1 == y1);
+        }
+        if (len >= 4) {
+            const x0 = std.mem.readInt(u32, a[0..4], .little);
+            const y0 = std.mem.readInt(u32, b[0..4], .little);
+            const x1 = std.mem.readInt(u32, a[len - 4 ..][0..4], .little);
+            const y1 = std.mem.readInt(u32, b[len - 4 ..][0..4], .little);
+            return (x0 == y0) and (x1 == y1);
+        }
+        for (0..len) |i| if (a[i] != b[i]) return false;
+        return true;
+    }
+    inline fn find(self: *Table, pword: [*]const u8, len: usize, word: u64) *Slot {
+        // TODO:
+        //     - SIMD
+        //     - fingerprint/control byte as Bloom if long probe sequence (delayed activation over P(len) ?)
+        //
+        //     B: probe_total=93800, probe_max=10, lookup_count=77392
+        var i: usize = @intCast(hash(word, len) >> (64 - TABLE_BITS)); // logical slot in AoS
+        var probes: u64 = 0;
+        while (true) : (i = (i + 1) & (TABLE_SLOTS - 1)) { // linear probing if occupied
+            probes += 1;
+            const s = &self.slots[i];
+            if (s.pword_len == len and eqlKey(s.pword, pword, len)) {
+                s.probe_total += probes;
+                s.probe_max = @max(s.probe_max, probes);
+                s.lookup_count += 1;
+                return s;
+            } // found
+            if (s.pword_len == 0) { // empty slot (real or probing)
+                s.* = .{
+                    .pword = pword,
+                    .sum = 0,
+                    .pword_len = @intCast(len),
+                    .count = 0,
+                    .min = std.math.maxInt(i32),
+                    .max = std.math.minInt(i32),
+
+                    .probe_total = probes,
+                    .probe_max = probes,
+                    .lookup_count = 1,
+                };
+                return s;
+            }
+
+        }
+    }
+
+    inline fn prefixSafe(pword: [*]const u8, len: usize) u64 {
+        // EOF safe
+        var t: [8]u8 = @splat(0);
+        const n = @min(len, 8);
+        @memcpy(t[0..n], pword[0..n]);
+        return std.mem.readInt(u64, &t, .little);
+    }
+
+    inline fn prefixFast(pword: [*]const u8, len: usize) u64 {
+        // UB OOBound
+        const word = std.mem.readInt(u64, pword[0..8], .little);
+        const glight: u64 = 
+            if (len >= 8) ~@as(u64, 0) // 0xFFF..
+            else (@as(u64, 1) << @intCast(8 * len)) - 1; // or 0x1FF-1=0xFF..
+        return word & glight;
+    }
+
+    inline fn record(self: *Table, pword: [*]const u8, len: usize, word: u64, temp: i32) void {
+        //nasty API due to prefix* optimization (pword U word)
+        const s = self.find(pword, len, word);
+        s.count += 1;
+        s.min = @min(s.min, temp);
+        s.sum += temp;
+        s.max = @max(s.max, temp);
+    }
+
+    inline fn fuse(self: *Table, other: Slot) void {
+        const s = self.find(other.pword, other.pword_len, prefixSafe(other.pword, other.pword_len));
+        s.count += other.count;
+        s.min = @min(s.min, other.min);
+        s.sum += other.sum;
+        s.max = @max(s.max, other.max);
     }
 };
 
@@ -61,10 +153,12 @@ inline fn ParseTenths(str: []const u8) i32 {
     const len = number.len;
 
     const hundreds_digit: i32 = if (len == 4) number[0] - '0' else 0;
-    const value = hundreds_digit * 100 + @as(
-        i32,
-        number[len - 3] - '0',
-    ) * 10 + (number[len - 1] - '0');
+    const value = 
+        hundreds_digit 
+        * 100 
+        + @as(i32, number[len - 3] - '0')
+        * 10
+        + (number[len - 1] - '0');
 
     return (value ^ -is_negative) + is_negative;
 }
@@ -101,29 +195,14 @@ inline fn NLIdx(buf: []const u8, pos: usize) usize {
     return std.mem.indexOfScalarPos(u8, buf, p, '\n') orelse buf.len;
 }
 
-inline fn update(
-    arena: std.mem.Allocator,
-    stations: *Map,
-    name: []const u8,
-    temp: i32,
-) !void {
-    const gop = stations.getOrPutAssumeCapacity(name);
-    if (!gop.found_existing) {
-        gop.key_ptr.* = try arena.dupe(u8, name);
-        gop.value_ptr.* = .{};
-    }
-    gop.value_ptr.Update(temp);
-}
-
 inline fn worker(
     arena: std.mem.Allocator,
     buf: []const u8,
-    out: *Map,
+    out: *Table,
 ) !void {
 
     // HASH
-    var stations: Map = .empty;
-    try stations.ensureTotalCapacity(arena, 1 << 15);
+    var stations: Table = try Table.init(arena);
 
     var start: usize = 0;
     const fast_end = if (buf.len > 128) buf.len - 128 else 0;
@@ -131,11 +210,12 @@ inline fn worker(
     // BODY
     while (start < fast_end) {
         const sep = SemiIdx(buf, start);
-        const name = buf[start..sep];
+        const len = sep - start;
+        const key = buf.ptr + start;
         const vec = std.mem.readInt(u64, buf.ptr[sep + 1 ..][0..8], .little);
         const p = parseDataPoint(vec);
 
-        try update(arena, &stations, name, p.temp);
+        stations.record(key, len, Table.prefixFast(key, len), p.temp);
         start = sep + 1 + p.len;
     }
 
@@ -146,15 +226,14 @@ inline fn worker(
 
         const line = buf[start..nl];
         const sep = SemiReversedIdx(line);
-        const name = line[0..sep];
+        const key = line.ptr;
         const temp = ParseTenths(line[sep + 1 ..]);
 
-        try update(arena, &stations, name, temp);
+        stations.record(key, sep, Table.prefixSafe(key, sep), temp);
     }
     out.* = stations;
 }
 
-// vec;
 // line is always []u8;-?d?.d\n
 // merykitty's solution
 const MAGIC_MULTIPLIER: u64 = 100 * 0x1000000 + 10 * 0x10000 + 1; // 0x640A0001
@@ -162,13 +241,13 @@ inline fn parseDataPoint(vec: u64) struct {
     temp: i32,
     len: usize,
 } {
-    const negated = ~vec; 
+    const negated = ~vec;
     const sign: i64 = @as(i64, @bitCast(negated << 59)) >> 63; // byte 1 is `-`(0010 1101) || `0-9`(0011 xxxx)
                                                                // bit 4: differenciator
                                                                // ~vec: because negative is represented as activated bit (see it as `sign = ~(vec[4]);`)
-                                                               //`>>63` is arithmetic so it @splat(bit_sign)
+                                                               // `>>63` is arithmetic so it @splat(bit_sign)
     const sign_u: u64 = @bitCast(sign); // digits:0x00.. (which act as positive); `-`:0xFF..
-    const without_sign = vec & ~(sign_u & 0xFF); // if(pos) {0x00.. ->& 0x00.. ->~ 0xFF.. ->& full vec} 
+    const without_sign = vec & ~(sign_u & 0xFF); // if(pos) {0x00.. ->& 0x00.. ->~ 0xFF.. ->& full vec}
                                                       // else {0xFF.. ->& 0x00..FF ->~ 0xFF..00 ->& vec except *LE* byte(`-`)}
     const dot: u6 = @intCast(@ctz(negated & 0x10101000)); //detect dot, only byte 1, 2 or 3 (x.x, -x.x|xx.x, -xx.x)
                                                           //0x10101000: check {bit 12 ([1][4]), bit 20 ([2][4]) and bit 28 ([3][4])}
@@ -177,16 +256,16 @@ inline fn parseDataPoint(vec: u64) struct {
                                                 // because 0-9 in ASCII is `0011 xxxx`, where xxxx is the digit
                                                 // `-12.4` -> `124`
     const abs: i64 = @intCast(((digits *% MAGIC_MULTIPLIER) >> 32) & 0x3FF); //MAGIC_MULTIPLIER:
-                                                                             //       100 * 0x1000000:  T + 2^8     (1byte)
-                                                                             //     + 10 * 0x10000:     U + 2^16    (2bytes)
-                                                                             //     + 1:                F + 2^32    (4bytes)
+                                                                             //         100 * 0x1000000:  T + 2^8     (1byte)
+                                                                             //       + 10 * 0x10000:     U + 2^16    (2bytes)
+                                                                             //       + 1:                F + 2^32    (4bytes)
                                                                              //     MAGIC is here to make T, U and F meet at F place
-                                                                             //
-                                                                             //     multiply creates junk
-                                                                             //     our value is somewhere in the middle bits
-                                                                             //     value e[0;999] -> u10(1024)
-                                                                             //     since aligned dot at byte 3 (big endian side) we have a u64 with top half occupied
-                                                                             //     >>32 shift value from top to bottom half, then 0x3FF(11 1111 1111; 10bit) select the value from it
+                                                                             //       
+                                                                             // multiply creates junk
+                                                                             // our value is somewhere in the middle bits
+                                                                             // value e[0;999] -> u10(1024)
+                                                                             // since aligned dot at byte 3 (big endian side) we have a u64 with top half occupied
+                                                                             // >>32 shift value from top to bottom half, then 0x3FF(11 1111 1111; 10bit) select the value from it
     return .{ .temp = @intCast((abs ^ sign) - sign), .len = (dot >> 3) + 3 };
 }
 
@@ -240,7 +319,7 @@ pub fn main(init: std.process.Init) !void {
     for (arenas) |*a| a.* = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer for (arenas) |*a| a.deinit();
 
-    const results = try init.arena.allocator().alloc(Map, args.threads);
+    const results = try init.arena.allocator().alloc(Table, args.threads);
     for (0..args.threads) |t| {
         const raw_start = chunk * t;
         const raw_end = if (t == args.threads - 1) size else chunk * (t + 1);
@@ -261,37 +340,51 @@ pub fn main(init: std.process.Init) !void {
     for (handles) |h| h.join();
 
     // MERGE
-    var stations: Map = .empty;
-    for (results) |hashmap| {
-        var it = hashmap.iterator();
-        while (it.next()) |entry| {
-            const gop = try stations.getOrPut(init.arena.allocator(), entry.key_ptr.*);
-            if (!gop.found_existing) {
-                gop.key_ptr.* = try init.arena.allocator().dupe(u8, entry.key_ptr.*);
-                gop.value_ptr.* = .{};
-            }
-            gop.value_ptr.Fuse(entry.value_ptr.*);
+    var stations: Table = try .init(init.arena.allocator());
+    for (results) |tlb| {
+        for (tlb.slots) |s| {
+            if (s.pword_len != 0) stations.fuse(s);
         }
     }
 
     // PRINT
     if (std.mem.eql(u8, args.print, "p")) {
-        var c: usize = 0;
-        var it = stations.iterator();
-        while (it.next()) |entry| {
-            std.debug.print(
-                "[{s}] min:{d}, avg:{d:.1}, max:{d}\n",
-                .{
-                    entry.key_ptr.*,
-                    @as(f32, @floatFromInt(entry.value_ptr.min)) / 10,
-                    entry.value_ptr.Average() / 10,
-                    @as(f32, @floatFromInt(entry.value_ptr.max)) / 10,
-                },
-            );
-            c += 1;
-            if (c >= 5) {
-                break;
-            }
+        var name: []const u8 = undefined;
+        var count: i32 = 0;
+        var sum: i64 = 0;
+        var min: i32 = std.math.maxInt(i32);
+        var max: i32 = std.math.minInt(i32);
+        var probe_total: u64 = 0;
+        var probe_max: u64 = 0;
+        var lookup_count: u64 = 0;
+        for (stations.slots) |s| {
+            if (s.pword_len == 0) continue;
+            name = s.pword[0..s.pword_len];
+            count = s.count;
+            sum = s.sum;
+            min = @min(min, s.min);
+            max = @max(max, s.max);
+            probe_total+= s.probe_total;
+            probe_max = @max(s.probe_max, probe_max);
+            lookup_count += s.lookup_count;
         }
+        const avg: f64 = if (count != 0)
+            (@as(f64, @floatFromInt(sum))/10.0)/count
+        else
+            0.0;
+
+        const min_f: f64 = @as(f64, @floatFromInt(min)) / 10.0;
+        const max_f: f64 = @as(f64, @floatFromInt(max)) / 10.0;
+
+        std.debug.print(
+        "[{s}]: avg={d:.1} min={d:.1} max={d:.1}\n",
+            .{ name, avg, min_f, max_f },
+
+        );
+        std.debug.print(
+            "probe_total={d}, probe_max={d}, lookup_count={d}\n",
+            .{probe_total, probe_max, lookup_count},
+        );
+
     }
 }
