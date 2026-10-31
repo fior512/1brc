@@ -10,21 +10,27 @@ inline fn MARK(comptime comment: []const u8) void {
     asm volatile (prefix ++ comment ::: .{});
 }
 
+const DEBUG = true;
 const V: comptime_int = 32; // bytes (AVX)
 
 const TABLE_BITS = 15;
 const TABLE_SLOTS = 1 << TABLE_BITS;
+
+const Stats = if (DEBUG) struct {
+    probe_total: u64 = 0,
+    probe_max: u64 = 0,
+    lookup_count: u64 = 0,
+} else struct {};
+
 const Slot = struct {
     pword: [*]const u8,
+    prefix: u64,
     pword_len: u64,
     sum: i64,
     count: i32,
     min: i32,
     max: i32,
-
-    probe_total: u64, // lifetime
-    probe_max: u64, // single sequence
-    lookup_count: u64, // calls
+    stats: Stats = .{},
 };
 
 const Table = struct {
@@ -37,7 +43,7 @@ const Table = struct {
 
     fn init(arena: std.mem.Allocator) !Table {
         const slots = try arena.alignedAlloc(Slot, .@"64", TABLE_SLOTS);
-        // .@"64" is an enum litteral for alignement size, @ is here to allow names starting with number
+        // .@"64" is an enum litteral item for alignement size, @ is here to allow names starting with number
         @memset(std.mem.sliceAsBytes(slots), 0);
         return .{ .slots = slots };
     }
@@ -46,6 +52,7 @@ const Table = struct {
         //(1+ sqrt(5))/2 = @as(u64, 1.6180339887)
         return (word ^ len) *% 0x9E3779B97F4A7C15;
     }
+
 
     inline fn eqlKey(a: [*]const u8, b: [*]const u8, len: usize) bool {
         if (len >= 16) {
@@ -76,6 +83,12 @@ const Table = struct {
         for (0..len) |i| if (a[i] != b[i]) return false;
         return true;
     }
+
+    inline fn eqlKeyTail(a: [*]const u8, b: [*]const u8, len: usize) bool {
+        return std.mem.readInt(u64, a[len-8..][0..8], .little) 
+            == std.mem.readInt(u64, b[len-8..][0..8], .little);
+    }
+
     inline fn find(self: *Table, pword: [*]const u8, len: usize, word: u64) *Slot {
         // TODO:
         //     - SIMD
@@ -87,25 +100,34 @@ const Table = struct {
         while (true) : (i = (i + 1) & (TABLE_SLOTS - 1)) { // linear probing if occupied
             probes += 1;
             const s = &self.slots[i];
-            if (s.pword_len == len and eqlKey(s.pword, pword, len)) {
-                s.probe_total += probes;
-                s.probe_max = @max(s.probe_max, probes);
-                s.lookup_count += 1;
+            if (s.pword_len == len and s.prefix == word and switch (len) {
+                0...8 => true,
+                9...16 => eqlKeyTail(s.pword, pword, len), // branchless
+                else => eqlKey(s.pword, pword, len),
+            }) {
+                if (comptime DEBUG) {
+                    s.stats.probe_total += probes;
+                    s.stats.probe_max = @max(s.stats.probe_max, probes);
+                    s.stats.lookup_count += 1;
+                }
                 return s;
             } // found
-            if (s.pword_len == 0) { // empty slot (real or probing)
+            if (s.pword_len == 0) { // empty slot (real or probing) || MAQAO
                 s.* = .{
                     .pword = pword,
+                    .prefix = word,
                     .sum = 0,
                     .pword_len = @intCast(len),
                     .count = 0,
                     .min = std.math.maxInt(i32),
                     .max = std.math.minInt(i32),
-
-                    .probe_total = probes,
-                    .probe_max = probes,
-                    .lookup_count = 1,
+                    
                 };
+                if (comptime DEBUG) {
+                    s.stats.probe_total = probes;
+                    s.stats.probe_max = probes;
+                    s.stats.lookup_count = 1;
+                }
                 return s;
             }
 
@@ -242,7 +264,7 @@ inline fn parseDataPoint(vec: u64) struct {
     len: usize,
 } {
     const negated = ~vec;
-    const sign: i64 = @as(i64, @bitCast(negated << 59)) >> 63; // byte 1 is `-`(0010 1101) || `0-9`(0011 xxxx)
+    const sign: i64 = @as(i64, @bitCast(negated << 59)) >> 63; // byte 1 is `-`(0010_1101) || `0-9`(0011_xxxx)
                                                                // bit 4: differenciator
                                                                // ~vec: because negative is represented as activated bit (see it as `sign = ~(vec[4]);`)
                                                                // `>>63` is arithmetic so it @splat(bit_sign)
@@ -251,11 +273,12 @@ inline fn parseDataPoint(vec: u64) struct {
                                                       // else {0xFF.. ->& 0x00..FF ->~ 0xFF..00 ->& vec except *LE* byte(`-`)}
     const dot: u6 = @intCast(@ctz(negated & 0x10101000)); //detect dot, only byte 1, 2 or 3 (x.x, -x.x|xx.x, -xx.x)
                                                           //0x10101000: check {bit 12 ([1][4]), bit 20 ([2][4]) and bit 28 ([3][4])}
+                                                          //same as for '-' vs '0-9', bit differenciator is bit 4 ("." 0010_1110)
     const aligned = without_sign << @intCast(28 - @as(u32, dot)); // 12|20|28 - 28 = 16|8|0 -> shift to place dot at byte 3 (to handle xx.x and x.xx agnostically)
-    const digits = aligned & 0x0F000F0F00; // take only the low-nibble of digits byte only
-                                                // because 0-9 in ASCII is `0011 xxxx`, where xxxx is the digit
+    const digits= aligned & 0x0F000F0F00; // take only the low-nibble of digits byte only
+                                                // because 0-9 in ASCII is `0011_xxxx`, where xxxx is the digit
                                                 // `-12.4` -> `124`
-    const abs: i64 = @intCast(((digits *% MAGIC_MULTIPLIER) >> 32) & 0x3FF); //MAGIC_MULTIPLIER:
+    const real: i64 = @intCast(((digits *% MAGIC_MULTIPLIER) >> 32) & 0x3FF); //MAGIC_MULTIPLIER:
                                                                              //         100 * 0x1000000:  T + 2^8     (1byte)
                                                                              //       + 10 * 0x10000:     U + 2^16    (2bytes)
                                                                              //       + 1:                F + 2^32    (4bytes)
@@ -266,7 +289,7 @@ inline fn parseDataPoint(vec: u64) struct {
                                                                              // value e[0;999] -> u10(1024)
                                                                              // since aligned dot at byte 3 (big endian side) we have a u64 with top half occupied
                                                                              // >>32 shift value from top to bottom half, then 0x3FF(11 1111 1111; 10bit) select the value from it
-    return .{ .temp = @intCast((abs ^ sign) - sign), .len = (dot >> 3) + 3 };
+    return .{ .temp = @intCast((real ^ sign) - sign), .len = (dot >> 3) + 3 };
 }
 
 pub fn flags(args: anytype, arena: std.mem.Allocator) !struct { //TODO:find iterator type
@@ -354,9 +377,8 @@ pub fn main(init: std.process.Init) !void {
         var sum: i64 = 0;
         var min: i32 = std.math.maxInt(i32);
         var max: i32 = std.math.minInt(i32);
-        var probe_total: u64 = 0;
-        var probe_max: u64 = 0;
-        var lookup_count: u64 = 0;
+        var stats: Stats = .{};
+
         for (stations.slots) |s| {
             if (s.pword_len == 0) continue;
             name = s.pword[0..s.pword_len];
@@ -364,9 +386,12 @@ pub fn main(init: std.process.Init) !void {
             sum = s.sum;
             min = @min(min, s.min);
             max = @max(max, s.max);
-            probe_total+= s.probe_total;
-            probe_max = @max(s.probe_max, probe_max);
-            lookup_count += s.lookup_count;
+            
+            if (comptime DEBUG) {
+                stats.probe_total+= s.stats.probe_total;
+                stats.probe_max = @max(stats.probe_max, s.stats.probe_max);
+                stats.lookup_count += s.stats.lookup_count;       
+            }
         }
         const avg: f64 = if (count != 0)
             (@as(f64, @floatFromInt(sum))/10.0)/count
@@ -381,10 +406,13 @@ pub fn main(init: std.process.Init) !void {
             .{ name, avg, min_f, max_f },
 
         );
-        std.debug.print(
-            "probe_total={d}, probe_max={d}, lookup_count={d}\n",
-            .{probe_total, probe_max, lookup_count},
-        );
+
+        if (comptime DEBUG) {
+            std.debug.print(
+                "probe_total={d}, probe_max={d}, lookup_count={d}\n",
+                .{stats.probe_total, stats.probe_max, stats.lookup_count},
+            );
+        }
 
     }
 }

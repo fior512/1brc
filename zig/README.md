@@ -9,7 +9,8 @@ Run from `zig/`: `zig build -Doptimize=ReleaseFast -Dcpu=native` then `sudo gose
 | v3 | e038fed | 2895.00 | 31.00 | 2830.00 | 2920.00 | -27.5% | -36.8% | fixed-point parse |
 | v4 | 95f2118 | 1530.00 | 12.65 | 1500.00 | 1540.00 | -47.2% | -66.6% | merykitty's SWAR |
 | v5 | 362acff | 391.74 | 9.14 | 387.31 | 419.07 | -74.40% | -91.45% | threadpool |
-| v6 |  | 253.25 | 0.89 | 251.49 | 254.21 | -35.35% | -94.47% | AoS linear probing |
+| v6 | 94cc335 | 253.25 | 0.89 | 251.49 | 254.21 | -35.35% | -94.47% | AoS linear probing |
+| v7 | | 223.06 | 0.49 | 221.81 | 223.38 | -11.57% | -95.12% | fast-path eqlKey |
 
 
 ## v1: Textbook
@@ -85,3 +86,8 @@ Run from `zig/`: `zig build -Doptimize=ReleaseFast -Dcpu=native` then `sudo gose
 - Per row: 99.8 instructions, IPC 1.19, 0.86 branch misses, 1.36 L1d misses
 - Top-down: SMT contention 32.3% (goset's strategy), backend memory 28.5%, mispredicts 7.0%
 - `llvm-mca` ideal 26.7 cycles per row vs 83.6 measured
+
+
+## v7: Fast Path eqlKeyTail
+**Change**
+- new `eqlKeyTail` to have a branchless alternative to `eqlKey` when possible, switching with `switch()`
