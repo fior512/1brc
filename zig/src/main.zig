@@ -1,5 +1,4 @@
 //TODO:
-// - double hash in worker->record + prefetch already done
 // - Other probing/linked list strategies
 // - precompute slots owner with overfitted hash over keyset for no hashing
 // - pinmemory trick without hashing nor collisions??
