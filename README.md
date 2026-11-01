@@ -8,10 +8,9 @@
 - Multithreading: 8 threads
 
 ### Perfomances (ms; 100M rows)
-| lang | med | sd | min | max | 1B | link |
+| lang | med | sd | min | max | 1B(real) | link |
 |---|---|---|---|---|---|---|
-| **Zig** | 192.49 | 0.95 | 190.35 | 193.67 | 1.891s | [Zig](zig/README.md) | 
-
+| **Zig** | 150.47 | 0.50 | 149.94 | 151.72| 1.472s (1.026s)| [Zig](zig/README.md) | 
 
 
 ### Outputs
@@ -21,37 +20,37 @@
 ----------------- GOSET -----------------
 Selection
   cpu  sel  steer  non-steer  core  sibl  isol  numa  nohz  rcu
-    7   *       0          0    47     1           0
-    1   *       0         47    47     7           0
-    2   *       0         42    98     8           0
-    8   *       0         56    98     2           0
-    3   *       0         52   124     9           0
-    9   *       0         72   124     3           0
-    0   *       0        120   273     6           0
-    6   *       0        153   273     0           0
-    4   &       1         76   364    10           0
-   10           0        288   364     4           0
-    5         250        204   470    11           0
-   11           0        266   470     5           0
+    7   *       0          4    80     1           0
+    1   *       0         76    80     7           0
+    9   *       0         26   170     3           0
+    3   *      10        144   170     9           0
+    6   *       0         25   257     0           0
+    0   *       0        232   257     6           0
+   10   *       0         71   264     4           0
+    4   *       0        193   264    10           0
+    5   &      12        178   449    11           0
+   11         291        271   449     5           0
+    8           0         32   928     2           0
+    2           0        896   928     8           0
 
 Telemetry
   cpu  freq min  freq avg  freq max  throttle count  irq steerable  irq non-steerable
-  0     2.99GHz   4.76GHz   5.43GHz               0              0                844
-  1     2.99GHz   4.73GHz   5.24GHz               0              0                683
-  2     2.99GHz   5.10GHz   5.45GHz               0              0                868
-  3     2.45GHz   4.77GHz   5.35GHz               0              0                851
-  6     2.99GHz   4.72GHz   5.24GHz               0              0                693
-  7     2.99GHz   4.72GHz   5.24GHz               0              0                696
-  8     2.99GHz   4.71GHz   5.43GHz               0              0                692
-  9     2.99GHz   4.72GHz   5.24GHz               0              0                661
-  all   2.45GHz   4.78GHz   5.45GHz               0              0              5.99k
+  0     3.10GHz   5.04GHz   5.21GHz               0              0                625
+  1     2.99GHz   5.04GHz   5.21GHz               0              0                601
+  3     3.10GHz   5.04GHz   5.21GHz               0              0                676
+  4     2.99GHz   5.08GHz   5.45GHz               0              0                622
+  6     3.10GHz   5.04GHz   5.21GHz               0              0                602
+  7     2.99GHz   5.06GHz   5.21GHz               0              0                564
+  9     3.10GHz   5.04GHz   5.21GHz               0              0                539
+  10    2.99GHz   5.08GHz   5.45GHz               0              0                590
+  all   2.99GHz   5.05GHz   5.45GHz               0              0              4.82k
 
 Run
   task            sched                   steer
-  poll  2147@1ms  ctxsw vol           11  applied         40
-  wall    2.164s  ctxsw invol        246  rejected        26
-  util      666%  migrations           4  remaining        1
-  exit         0  run_delay     49.120μs  drift            0
+  poll  1458@1ms  ctxsw vol           12  applied         40
+  wall    1.472s  ctxsw invol        180  rejected        26
+  util      778%  migrations           3  remaining        1
+  exit         0  run_delay     10.230μs  drift            0
                                           irqbalance  absent
 ```
 
