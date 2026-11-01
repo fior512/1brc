@@ -10,7 +10,8 @@
 ### Perfomances (ms; 100M rows)
 | lang | med | sd | min | max | 1B | link |
 |---|---|---|---|---|---|---|
-| **Zig** | 223.06 | 0.49 | 221.81 | 223.38 | 2.164s | [Zig](zig/README.md) |
+| **Zig** | 192.49 | 0.95 | 190.35 | 193.67 | 1.891s | [Zig](zig/README.md) | 
+
 
 
 ### Outputs

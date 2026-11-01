@@ -1,3 +1,10 @@
+//TODO:
+// - double hash in worker->record + prefetch already done
+// - Other probing/linked list strategies
+// - precompute slots owner with overfitted hash over keyset for no hashing
+// - pinmemory trick without hashing nor collisions??
+// - 
+
 const std = @import("std");
 const builtin = @import("builtin");
 
@@ -10,9 +17,9 @@ inline fn MARK(comptime comment: []const u8) void {
     asm volatile (prefix ++ comment ::: .{});
 }
 
-const DEBUG = true;
-const V: comptime_int = 32; // bytes (AVX)
-
+const DEBUG = false; // probe telemetry
+const V = 32; // bytes (AVX)
+const LANES = 2; // 1: 64.3B cycles; 2: 49.7B cycles; 3: 49.6B; 4: 58.8B cycles
 const TABLE_BITS = 15;
 const TABLE_SLOTS = 1 << TABLE_BITS;
 
@@ -23,13 +30,16 @@ const Stats = if (DEBUG) struct {
 } else struct {};
 
 const Slot = struct {
-    pword: [*]const u8,
-    prefix: u64,
+    pword: [*]const u8 align(64), // -50ms
     pword_len: u64,
+
+    prefix: u64,
+    
     sum: i64,
     count: i32,
     min: i32,
     max: i32,
+    
     stats: Stats = .{},
 };
 
@@ -90,10 +100,6 @@ const Table = struct {
     }
 
     inline fn find(self: *Table, pword: [*]const u8, len: usize, word: u64) *Slot {
-        // TODO:
-        //     - SIMD
-        //     - fingerprint/control byte as Bloom if long probe sequence (delayed activation over P(len) ?)
-        //
         //     B: probe_total=93800, probe_max=10, lookup_count=77392
         var i: usize = @intCast(hash(word, len) >> (64 - TABLE_BITS)); // logical slot in AoS
         var probes: u64 = 0;
@@ -217,16 +223,8 @@ inline fn NLIdx(buf: []const u8, pos: usize) usize {
     return std.mem.indexOfScalarPos(u8, buf, p, '\n') orelse buf.len;
 }
 
-inline fn worker(
-    arena: std.mem.Allocator,
-    buf: []const u8,
-    out: *Table,
-) !void {
-
-    // HASH
-    var stations: Table = try Table.init(arena);
-
-    var start: usize = 0;
+inline fn ParserTail(stations: *Table, buf: []const u8, start0: usize) void {
+    var start = start0;
     const fast_end = if (buf.len > 128) buf.len - 128 else 0;
 
     // BODY
@@ -253,10 +251,75 @@ inline fn worker(
 
         stations.record(key, sep, Table.prefixSafe(key, sep), temp);
     }
-    out.* = stations;
+
 }
 
-// line is always []u8;-?d?.d\n
+inline fn allBelow(pos: [LANES]usize, limit: [LANES]usize) bool { // eww
+    var state = true;
+    inline for (0..LANES) |l| state = (state and pos[l] < limit[l]);
+    return state;
+}
+
+
+inline fn worker(
+    arena: std.mem.Allocator,
+    buf: []const u8,
+    out: *Table,
+) !void {
+    // HASH
+    var stations: Table = try Table.init(arena);
+    
+    var sub: [LANES][]const u8 = undefined; // LANES sub-slices
+    var a: usize = 0;
+    for (0..LANES) |l| { // cut the thread' slice by LANES
+        const b = 
+            if (l == LANES-1) buf.len // end of worker slice
+            else @min(
+                NLIdx(buf, buf.len/LANES * (l+1)-1)+1,
+                buf.len,
+            );
+        sub[l] = buf[a..b];
+        a = b;
+    }
+
+    var pos: [LANES]usize = @splat(0); // set 0 to all lanes
+    var limit: [LANES]usize = undefined;
+    inline for (0..LANES) |l| limit[l] = if (sub[l].len > 128) sub[l].len - 128 else 0;
+
+    while (allBelow(pos, limit)) {
+        var pword: [LANES][*]const u8 = undefined;
+        var len: [LANES]usize = undefined;
+        var word: [LANES]u64 = undefined;
+        var temp: [LANES]i32 = undefined;
+
+        inline for (0..LANES) |l| { 
+            const s = sub[l];
+            const sep = SemiIdx(s, pos[l]);
+            const p = parseDataPoint(std.mem.readInt(u64, s.ptr[sep+1..][0..8], .little));
+
+            pword[l] = s.ptr + pos[l];
+            len[l] = sep - pos[l];
+            word[l] = Table.prefixFast(pword[l], len[l]);
+            temp[l] = p.temp;
+            pos[l] = sep+1+p.len;
+
+            @prefetch( // Prefetch slot
+                &stations.slots[Table.hash(word[l], len[l]) >> (64 - TABLE_BITS)], 
+                .{ .rw = .read, .locality = 3, .cache = .data},
+            ); // hash is fused by LLVM, no redundant hashing with (below)record() -> find() -> hash()
+        }
+        // prefetch logical slot for each LANEs chunk[i]
+        // update AoS
+        // ++i
+
+        inline for (0..LANES) |l| stations.record(pword[l], len[l], word[l], temp[l]); // AoS boost via prefetched
+    }
+
+    inline for (0..LANES) |l| ParserTail(&stations, sub[l], pos[l]); // tail
+    out.* = stations; // worker return
+}
+
+// line is always []u8;?-?dd.d\n
 // merykitty's solution
 const MAGIC_MULTIPLIER: u64 = 100 * 0x1000000 + 10 * 0x10000 + 1; // 0x640A0001
 inline fn parseDataPoint(vec: u64) struct {
@@ -292,7 +355,7 @@ inline fn parseDataPoint(vec: u64) struct {
     return .{ .temp = @intCast((real ^ sign) - sign), .len = (dot >> 3) + 3 };
 }
 
-pub fn flags(args: anytype, arena: std.mem.Allocator) !struct { //TODO:find iterator type
+pub fn flags(args: anytype, arena: std.mem.Allocator) !struct { // what is even the type Iterator
     csv: []const u8,
     print: []const u8,
     threads: u32,
