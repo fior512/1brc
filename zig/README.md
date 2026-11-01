@@ -12,7 +12,7 @@ Run from `zig/`: `zig build -Doptimize=ReleaseFast -Dcpu=native` then `sudo gose
 | v6 | 94cc335 | 253.25 | 0.89 | 251.49 | 254.21 | -35.35% | -94.47% | AoS linear probing |
 | v7 | c0c9744 | 223.06 | 0.49 | 221.81 | 223.38 | -11.57% | -95.12% | fast-path eqlKey |
 | v8 | 09090da | 192.49 | 0.95 | 190.35 | 193.67 | -13.17% | -95.77% | Interleaved+Prefetch workers |
-| v9 | | 150.47 | 0.50 | 149.94 | 151.72 | -21.83% | -96.71% | suffix + no POPULATE |
+| v9 | 00b3729 | 150.47 | 0.50 | 149.94 | 151.72 | -21.83% | -96.71% | suffix + no POPULATE |
 
 
 
