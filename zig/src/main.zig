@@ -33,7 +33,8 @@ const Slot = struct {
     pword_len: u64,
 
     prefix: u64,
-    
+    suffix: u64,
+
     sum: i64,
     count: i32,
     min: i32,
@@ -107,8 +108,8 @@ const Table = struct {
             const s = &self.slots[i];
             if (s.pword_len == len and s.prefix == word and switch (len) {
                 0...8 => true,
-                9...16 => eqlKeyTail(s.pword, pword, len), // branchless
-                else => eqlKey(s.pword, pword, len),
+                9...16 => s.suffix == suffix(pword, len), // branchless
+                else => s.suffix == suffix(pword, len) and eqlKey(s.pword, pword, len),
             }) {
                 if (comptime DEBUG) {
                     s.stats.probe_total += probes;
@@ -120,9 +121,11 @@ const Table = struct {
             if (s.pword_len == 0) { // empty slot (real or probing) || MAQAO
                 s.* = .{
                     .pword = pword,
-                    .prefix = word,
-                    .sum = 0,
                     .pword_len = @intCast(len),
+
+                    .prefix = word,
+                    .suffix = if (len>8) suffix(pword, len) else 0, 
+                    .sum = 0,
                     .count = 0,
                     .min = std.math.maxInt(i32),
                     .max = std.math.minInt(i32),
@@ -152,8 +155,12 @@ const Table = struct {
         const word = std.mem.readInt(u64, pword[0..8], .little);
         const glight: u64 = 
             if (len >= 8) ~@as(u64, 0) // 0xFFF..
-            else (@as(u64, 1) << @intCast(8 * len)) - 1; // or 0x1FF-1=0xFF..
+            else (@as(u64, 1) << @intCast(8 * len)) - 1; // or 0x100-1=0xFF..
         return word & glight;
+    }
+
+    inline fn suffix(pword: [*]const u8, len: usize) u64 {
+        return std.mem.readInt(u64, pword[len-8..][0..8], .little);
     }
 
     inline fn record(self: *Table, pword: [*]const u8, len: usize, word: u64, temp: i32) void {
@@ -304,7 +311,7 @@ inline fn worker(
 
             @prefetch( // Prefetch slot
                 &stations.slots[Table.hash(word[l], len[l]) >> (64 - TABLE_BITS)], 
-                .{ .rw = .read, .locality = 3, .cache = .data},
+                .{ .rw = .write, .locality = 3, .cache = .data},
             ); // hash is fused by LLVM, no redundant hashing with (below)record() -> find() -> hash()
         }
         // prefetch logical slot for each LANEs chunk[i]
@@ -391,7 +398,7 @@ pub fn main(init: std.process.Init) !void {
         null,
         size,
         .{ .READ = true },
-        .{ .TYPE = .PRIVATE, .POPULATE = true },
+        .{ .TYPE = .PRIVATE },
         file.handle,
         0,
     );

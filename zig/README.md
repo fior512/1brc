@@ -12,6 +12,8 @@ Run from `zig/`: `zig build -Doptimize=ReleaseFast -Dcpu=native` then `sudo gose
 | v6 | 94cc335 | 253.25 | 0.89 | 251.49 | 254.21 | -35.35% | -94.47% | AoS linear probing |
 | v7 | c0c9744 | 223.06 | 0.49 | 221.81 | 223.38 | -11.57% | -95.12% | fast-path eqlKey |
 | v8 | 09090da | 192.49 | 0.95 | 190.35 | 193.67 | -13.17% | -95.77% | Interleaved+Prefetch workers |
+| v9 | | 150.47 | 0.50 | 149.94 | 151.72 | -21.83% | -96.71% | suffix + no POPULATE |
+
 
 
 ## v1: Textbook
@@ -96,3 +98,14 @@ Run from `zig/`: `zig build -Doptimize=ReleaseFast -Dcpu=native` then `sudo gose
 
 ## v8: Interleaved workers with manual Prefetch
 - Refactor `worker()` for a Interleaved 2-lanes runtime with manual prefetch
+
+
+## v9: Suffix + no MAP_POPULATE
+**Change**
+- `Slot.suffix`: last 8 key bytes stored in the slot, so 9-16 B keys compare without dereferencing `pword`
+- `mmap` without `.POPULATE`: pages fault in the workers instead of on the main thread before they spawn
+
+**Profile**
+- `mmap` with `.POPULATE`, single-threaded (`strace -T`): 40.0 ms on 100M, 388.6 ms on 1B
+- Removing `.POPULATE`, 1B wall, one run: 1.802s -> 1.472s
+- Removing `.POPULATE`, `goset` util on 1B: 641% -> 778%
