@@ -10,7 +10,8 @@ Run from `zig/`: `zig build -Doptimize=ReleaseFast -Dcpu=native` then `sudo gose
 | v4 | 95f2118 | 1530.00 | 12.65 | 1500.00 | 1540.00 | -47.2% | -66.6% | merykitty's SWAR |
 | v5 | 362acff | 391.74 | 9.14 | 387.31 | 419.07 | -74.40% | -91.45% | threadpool |
 | v6 | 94cc335 | 253.25 | 0.89 | 251.49 | 254.21 | -35.35% | -94.47% | AoS linear probing |
-| v7 | | 223.06 | 0.49 | 221.81 | 223.38 | -11.57% | -95.12% | fast-path eqlKey |
+| v7 | c0c9744 | 223.06 | 0.49 | 221.81 | 223.38 | -11.57% | -95.12% | fast-path eqlKey |
+| v8 | | 192.49 | 0.95 | 190.35 | 193.67 | -13.17% | -95.77% | Interleaved+Prefetch workers |
 
 
 ## v1: Textbook
@@ -91,3 +92,7 @@ Run from `zig/`: `zig build -Doptimize=ReleaseFast -Dcpu=native` then `sudo gose
 ## v7: Fast Path eqlKeyTail
 **Change**
 - new `eqlKeyTail` to have a branchless alternative to `eqlKey` when possible, switching with `switch()`
+
+
+## v8: Interleaved workers with manual Prefetch
+- Refactor `worker()` for a Interleaved 2-lanes runtime with manual prefetch
