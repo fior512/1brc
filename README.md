@@ -19,7 +19,7 @@
 ### Comparison (s; 1B rows)
 | impl | official 1B| vs me | official 10k 1B | vs me | 1B synthetic | vs Zig |
 |---|---|---|---|---|---|---|
-| me Zig | 0.738 | - | 1.023 | - | 0.893 | - |
+| me Zig | 0.738 | | 1.023 | | 0.893 | |
 | [lehuyduc](https://github.com/lehuyduc/1brc-simd) C++ | 0.641 | -13.1% | 0.926 | -9.5% | 0.824 | -7.8% |
 | [austindonisan](https://github.com/austindonisan/1brc) C | 0.325 | -56.0% | 0.913 | -10.8% | 0.627 | -29.8% |
 
