@@ -17,15 +17,11 @@
 > real: sched managed task, 12 threads.
 
 ### Comparison (s; 1B rows)
-| impl | DB_1B | vs Zig | DB_10k | vs Zig | synthetic | vs Zig |
+| impl | official 1B| vs me | official 10k 1B | vs me | 1B synthetic | vs Zig |
 |---|---|---|---|---|---|---|
-| **Zig** | 0.738 | - | 1.023 | - | 0.893 | - |
-| [lehuyduc](https://github.com/lehuyduc/1brc-simd) | 0.641 | -13.1% | 0.926 | -9.5% | 0.824 | -7.8% |
-| [austindonisan](https://github.com/austindonisan/1brc) | 0.325 | -56.0% | 0.913 | -10.8% | 0.627 | -29.8% |
-
-> Median of 10 runs after 1 warmup, interleaved, bash `time` real, 12 threads, sched managed (no taskset, no goset).
-> austindonisan pins its threads by default, built here with `PIN_CPU false`.
-> Output: lehuyduc and austindonisan sort and write the full results (identical on all 3 files), Zig writes none.
+| me Zig | 0.738 | - | 1.023 | - | 0.893 | - |
+| [lehuyduc](https://github.com/lehuyduc/1brc-simd) C++ | 0.641 | -13.1% | 0.926 | -9.5% | 0.824 | -7.8% |
+| [austindonisan](https://github.com/austindonisan/1brc) C | 0.325 | -56.0% | 0.913 | -10.8% | 0.627 | -29.8% |
 
 
 ### Outputs
