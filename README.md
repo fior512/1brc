@@ -7,8 +7,6 @@
 - Iterations: **>10**
 - Multithreading: 8 threads
 
-> stop using goset in v10, but keeping 8 threads
-
 ### Perfomances (ms; 100M rows)
 | lang | med | sd | min | max | 1B(real) | link |
 |---|---|---|---|---|---|---|
