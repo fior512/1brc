@@ -2,7 +2,8 @@
 // - Other probing/linked list strategies
 // - precompute slots owner with overfitted hash over keyset for no hashing
 // - pinmemory trick without hashing nor collisions??
-// - 
+// - u64 -> u128 key
+//
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -16,11 +17,152 @@ inline fn MARK(comptime comment: []const u8) void {
     asm volatile (prefix ++ comment ::: .{});
 }
 
+fn x86_64_tsc() u64 {
+    return asm volatile(
+        \\ rdtsc
+        \\ shl $32, %%rdx
+        \\ or %%rdx, %%rax
+        : [ret] "={rax}" (-> u64)
+        :
+        : .{ .rdx = true }
+    );
+}
+
 const DEBUG = false; // probe telemetry
+const TSC_GHZ = 4.7; // 7600X
 const V = 32; // bytes (AVX)
-const LANES = 2; // 1: 64.3B cycles; 2: 49.7B cycles; 3: 49.6B; 4: 58.8B cycles
-const TABLE_BITS = 15;
+const LANES = 2; //v8:  1: 64.3B cycles; 2: 49.7B cycles; 3: 49.6B; 4: 58.8B cycles
+const TABLE_BITS = 17; //v9: 15: 950ms; 17: 900ms
 const TABLE_SLOTS = 1 << TABLE_BITS;
+
+const STATION_NAMES= @embedFile("stations"); // addAnonymousImport() in build.zig
+const PHF_BUCKET_BITS = 10;
+const PHF_BUCKETS = 1 << PHF_BUCKET_BITS;
+const STATION_COUNT = blk: {
+    @setEvalBranchQuota(1_000_000);
+    break :blk std.mem.count(u8, STATION_NAMES, "\n");
+};
+
+const Phf = struct {
+    mult: u64 = 0x63CBE1E459320DD7, //7191089600892374487
+    shifts: [PHF_BUCKETS]u16 = @splat(0),
+};
+
+
+const phf: Phf = .{};
+fn buildPhf() Phf {
+    @setEvalBranchQuota(2_000_000_000); // increase default limits
+
+
+    // chars to key
+    var keys: [STATION_COUNT]u64 = undefined; // out
+    var lines = std.mem.tokenizeScalar(u8, STATION_NAMES, '\n'); //split rows
+    var n: usize = 0;
+    while (lines.next()) |name| : (n+=1) { // contains only the city
+        var word: u64 = 0;
+        for (name[0..@min(name.len, 8)], 0..) |char, idx| { // 8 first bytes
+            word |= @as(u64, char) << @intCast(8*idx); // place the char to its position in u64
+        }
+        keys[n] = word ^ name.len; // 2 cities with same prefix lands with higher P differently with len mixup
+    }
+
+    // naive random search
+    var seed: u64 = 7;
+    while (true) { // splitmix64 (same speed as xoroshiro128+ but more stable)
+        seed +%= 0x9E3779B97F4A7C15; 
+        var z = seed;
+        z = (z ^ (z >> 30)) *% 0xBF58476D1CE4E5B9;
+        z = (z ^ (z >> 27)) *% 0x94D049BB133111EB;
+        const mult = (z ^ (z >> 31)) | 1;
+        if (placeBuckets(&keys, mult)) |shifts| return .{ .mult = mult, .shifts = shifts };
+    }
+}
+
+fn placeBuckets(keys: *const [STATION_COUNT]u64, mult: u64) ?[PHF_BUCKETS]u16 { // return Phf.shifts
+    // Goal is to obtain one slot per key, but nearly impossible to treat
+    //      to do so, we use buckets as "cluster" of keys that are "close" to each others
+    //          from this cluster we can then use a single parameter (shift) to finetune them to avoid collisions
+    //          single mult, one shift per bucket (shift lookup-table with cluster to compress it)
+    //
+    
+    const none = std.math.maxInt(u32);
+    
+    var bucket_heads: [PHF_BUCKETS]u32 = @splat(none); // first key_index of the bucket ("owner" of the bucket)
+    var next_in_bucket: [STATION_COUNT]u32 = undefined; // linked list dangling from `bucket_heads` (for every key_index, associate to an other key_index as "owner")
+    var bucket_sizes: [PHF_BUCKETS]u16 = @splat(0);
+    var largest: u16 = 0;
+
+    // Test `mult` trial (caller)
+    for (keys, 0..) |key, idx| {
+        const bucket = (key *% mult) >> (64 - PHF_BUCKET_BITS); // bucket slot
+        next_in_bucket[idx] = bucket_heads[bucket]; // push_front()
+        bucket_heads[bucket] = @intCast(idx); // Iter(key_index) -> Key Owner
+        bucket_sizes[bucket] += 1; // bucket size
+        largest = @max(largest, bucket_sizes[bucket]);
+    }
+
+    // Evaluate
+    var used: [TABLE_SLOTS]bool = @splat(false);
+    var shifts: [PHF_BUCKETS]u16 = @splat(0);
+    var target_size: u16 = largest; // largest first
+    while (target_size > 0) : (target_size -= 1) {
+        for (0..PHF_BUCKETS) |bucket| {
+            if (bucket_sizes[bucket] != target_size) continue;
+
+            var group_offsets: [256]usize = undefined; // one entry per distinct key of the bucket
+            var group_sizes: [256]usize = undefined;
+            var group_keys: [256]u64 = undefined;
+            var group_count: usize = 0;
+            var key_index = bucket_heads[bucket]; 
+
+            while (key_index != none) : (key_index = next_in_bucket[key_index]) { // unroll the bucket
+                const hash = keys[key_index] *% mult;
+                const offset: usize = @intCast((hash >> (64 - PHF_BUCKET_BITS - TABLE_BITS)) & (TABLE_SLOTS - 1));
+                var same_key = false;
+                for (0..group_count) |group| {
+                    if (group_keys[group] == keys[key_index]) {
+                        group_sizes[group] += 1;
+                        same_key = true;
+                    } else if (group_offsets[group] == offset) {
+                        return null; // no shift can separate these two, refute the `mult` trial
+                    }
+                }
+                if (!same_key) {
+                    if (group_count == group_offsets.len) return null;
+                    group_keys[group_count] = keys[key_index];
+                    group_offsets[group_count] = offset;
+                    group_sizes[group_count] = 1;
+                    group_count += 1;
+                }   
+            }
+              
+            var shift: usize = 0;
+            place: while (shift < TABLE_SLOTS and shift <= std.math.maxInt(u16)) : (shift += 1) {
+                var marked: [256]usize = undefined;
+                var marked_count: usize = 0;
+                var fits = true;
+                check: for (0..group_count) |group| {
+                    for (0..group_sizes[group]) |j| {
+                        const slot = (group_offsets[group] + shift + j) & (TABLE_SLOTS - 1);
+                        if (used[slot] or marked_count == marked.len) {
+                            fits = false;
+                            break :check;
+                        }
+                        used[slot] = true;
+                        marked[marked_count] = slot;
+                        marked_count += 1;
+                    }
+                }
+                if (fits) {
+                    shifts[bucket] = @intCast(shift);
+                    break :place;
+                }   
+                for (marked[0..marked_count]) |slot| used[slot] = false;
+            } else return null;
+        }   
+    }
+    return shifts;
+}
 
 const Stats = if (DEBUG) struct {
     probe_total: u64 = 0,
@@ -50,7 +192,7 @@ const Table = struct {
     // - cheap hash
     // - SIMD pword comparison
     slots: []Slot, //AoS
-
+    
     fn init(arena: std.mem.Allocator) !Table {
         const slots = try arena.alignedAlloc(Slot, .@"64", TABLE_SLOTS);
         // .@"64" is an enum litteral item for alignement size, @ is here to allow names starting with number
@@ -60,8 +202,42 @@ const Table = struct {
 
     inline fn hash(word: u64, len: usize) u64 {
         //(1+ sqrt(5))/2 = @as(u64, 1.6180339887)
-        return (word ^ len) *% 0x9E3779B97F4A7C15;
+        return (word ^ len) *% phf.mult; //0x9E3779B97F4A7C15; // custom hash over key (comptime)
+
+        // both official datasets (1B and 10k) doesn't need custom hash() because only 413 city names exist
+        //      additional names are slice-mix from existing ones, so `word ^ len` is carrying the collisions mitigation.
+        //  I started this adventure with a synthetic datasets (9674 city names) and (w^l)*%0x9E3779B97F4A7C15 leading to +16k collisions
+        //      So custom hashing was necessary for me, i now use my custom version without the shifts because it still handles better the official 1B.
+        //
+        //
+
+        // TABLE_BITS = 17
+        // (word ^ len) *% MAGIC
+        // 1B
+        //      0x9E3779B97F4A7C15: probe_total=4968, probe_max=2, lookup_count=4956; 12 collisions
+        //      0x63CBE1E459320DD7: probe_total=4956, probe_max=1, lookup_count=4956;  0 collisions
+        //
+        // 10k
+        //      0x9E3779B97F4A7C15: probe_total=124764, probe_max=4, lookup_count=120000; 4764 collisions
+        //      0x63CBE1E459320DD7: probe_total=124548, probe_max=4, lookup_count=120000; 4548 collisions
+        //
+        //
+        //  collisions are summed, so avg: x/threads ~= 400 per threads; 95% are fine
+        //  i can make it drop to 0 by adding shift, but not worth the home() logic per hash
+        //
+        //  0x63CBE1E459320DD7 have been generated for the synthetic dataset, not the official
+
     }
+
+    // Phf.mult is carrying the hashing, shifts aren't necessary in this scenario.
+    // This is the function i am supposed to use if Phf.mult was overfitted
+    //
+    // inline fn home(word: u64, len: usize) usize {
+    //     const h = hash(word, len);
+    //     const bucket = h >> (64 - PHF_BUCKET_BITS);
+    //     const offset = (h >> (64 - PHF_BUCKET_BITS - TABLE_BITS)) & (TABLE_SLOTS - 1);
+    //     return @intCast((offset + phf.shifts[bucket]) & (TABLE_SLOTS - 1));
+    // }
 
 
     inline fn eqlKey(a: [*]const u8, b: [*]const u8, len: usize) bool {
@@ -94,32 +270,29 @@ const Table = struct {
         return true;
     }
 
-    inline fn eqlKeyTail(a: [*]const u8, b: [*]const u8, len: usize) bool {
-        return std.mem.readInt(u64, a[len-8..][0..8], .little) 
-            == std.mem.readInt(u64, b[len-8..][0..8], .little);
-    }
-
     inline fn find(self: *Table, pword: [*]const u8, len: usize, word: u64) *Slot {
-        //     B: probe_total=93800, probe_max=10, lookup_count=77392
-        var i: usize = @intCast(hash(word, len) >> (64 - TABLE_BITS)); // logical slot in AoS
+
+
+        var i: usize = @intCast(hash(word, len) >> (64 - TABLE_BITS)); //home(word, len); // logical slot in AoS
+
         var probes: u64 = 0;
         while (true) : (i = (i + 1) & (TABLE_SLOTS - 1)) { // linear probing if occupied
             probes += 1;
-            const s = &self.slots[i];
-            if (s.pword_len == len and s.prefix == word and switch (len) {
+            const slot = &self.slots[i];
+            if (slot.pword_len == len and slot.prefix == word and switch (len) {
                 0...8 => true,
-                9...16 => s.suffix == suffix(pword, len), // branchless
-                else => s.suffix == suffix(pword, len) and eqlKey(s.pword, pword, len),
+                9...16 => slot.suffix == suffix(pword, len), // branchless
+                else => slot.suffix == suffix(pword, len) and eqlKey(slot.pword, pword, len),
             }) {
                 if (comptime DEBUG) {
-                    s.stats.probe_total += probes;
-                    s.stats.probe_max = @max(s.stats.probe_max, probes);
-                    s.stats.lookup_count += 1;
+                    slot.stats.probe_total += probes;
+                    slot.stats.probe_max = @max(slot.stats.probe_max, probes);
+                    slot.stats.lookup_count += 1;
                 }
-                return s;
+                return slot;
             } // found
-            if (s.pword_len == 0) { // empty slot (real or probing) || MAQAO
-                s.* = .{
+            if (slot.pword_len == 0) { // empty slot (real or probing) || MAQAO
+                slot.* = .{
                     .pword = pword,
                     .pword_len = @intCast(len),
 
@@ -132,11 +305,11 @@ const Table = struct {
                     
                 };
                 if (comptime DEBUG) {
-                    s.stats.probe_total = probes;
-                    s.stats.probe_max = probes;
-                    s.stats.lookup_count = 1;
+                    slot.stats.probe_total = probes;
+                    slot.stats.probe_max = probes;
+                    slot.stats.lookup_count = 1;
                 }
-                return s;
+                return slot;
             }
 
         }
@@ -165,19 +338,19 @@ const Table = struct {
 
     inline fn record(self: *Table, pword: [*]const u8, len: usize, word: u64, temp: i32) void {
         //nasty API due to prefix* optimization (pword U word)
-        const s = self.find(pword, len, word);
-        s.count += 1;
-        s.min = @min(s.min, temp);
-        s.sum += temp;
-        s.max = @max(s.max, temp);
+        const slot = self.find(pword, len, word);
+        slot.count += 1;
+        slot.min = @min(slot.min, temp);
+        slot.sum += temp;
+        slot.max = @max(slot.max, temp);
     }
 
     inline fn fuse(self: *Table, other: Slot) void {
-        const s = self.find(other.pword, other.pword_len, prefixSafe(other.pword, other.pword_len));
-        s.count += other.count;
-        s.min = @min(s.min, other.min);
-        s.sum += other.sum;
-        s.max = @max(s.max, other.max);
+        const slot = self.find(other.pword, other.pword_len, prefixSafe(other.pword, other.pword_len));
+        slot.count += other.count;
+        slot.min = @min(slot.min, other.min);
+        slot.sum += other.sum;
+        slot.max = @max(slot.max, other.max);
     }
 };
 
@@ -195,6 +368,11 @@ inline fn ParseTenths(str: []const u8) i32 {
         + (number[len - 1] - '0');
 
     return (value ^ -is_negative) + is_negative;
+}
+
+inline fn lineStartAtOrAfter(buf: []const u8, pos: usize) usize {
+    if (pos == 0 or pos >= buf.len) return @min(pos, buf.len);
+    return @min(NLIdx(buf, pos - 1) + 1, buf.len);
 }
 
 inline fn SemiIdx(buf: []const u8, start: usize) usize { // BODY: no EOL assumption
@@ -237,11 +415,11 @@ inline fn ParserTail(stations: *Table, buf: []const u8, start0: usize) void {
     while (start < fast_end) {
         const sep = SemiIdx(buf, start);
         const len = sep - start;
-        const key = buf.ptr + start;
+        const pword = buf.ptr + start;
         const vec = std.mem.readInt(u64, buf.ptr[sep + 1 ..][0..8], .little);
         const p = parseDataPoint(vec);
 
-        stations.record(key, len, Table.prefixFast(key, len), p.temp);
+        stations.record(pword, len, Table.prefixFast(pword, len), p.temp);
         start = sep + 1 + p.len;
     }
 
@@ -252,10 +430,10 @@ inline fn ParserTail(stations: *Table, buf: []const u8, start0: usize) void {
 
         const line = buf[start..nl];
         const sep = SemiReversedIdx(line);
-        const key = line.ptr;
+        const pword = line.ptr;
         const temp = ParseTenths(line[sep + 1 ..]);
 
-        stations.record(key, sep, Table.prefixSafe(key, sep), temp);
+        stations.record(pword, sep, Table.prefixSafe(pword, sep), temp);
     }
 
 }
@@ -271,7 +449,11 @@ inline fn worker(
     arena: std.mem.Allocator,
     buf: []const u8,
     out: *Table,
+    busy_tsc: *u64,
 ) !void {
+    const t_begin = x86_64_tsc(); // here to produce threads imbalance
+    defer busy_tsc.* = x86_64_tsc() - t_begin;
+
     // HASH
     var stations: Table = try Table.init(arena);
     
@@ -280,10 +462,8 @@ inline fn worker(
     for (0..LANES) |l| { // cut the thread' slice by LANES
         const b = 
             if (l == LANES-1) buf.len // end of worker slice
-            else @min(
-                NLIdx(buf, buf.len/LANES * (l+1)-1)+1,
-                buf.len,
-            );
+            else lineStartAtOrAfter(buf, buf.len/LANES * (l+1));
+
         sub[l] = buf[a..b];
         a = b;
     }
@@ -299,11 +479,11 @@ inline fn worker(
         var temp: [LANES]i32 = undefined;
 
         inline for (0..LANES) |l| { 
-            const s = sub[l];
-            const sep = SemiIdx(s, pos[l]);
-            const p = parseDataPoint(std.mem.readInt(u64, s.ptr[sep+1..][0..8], .little));
+            const slot = sub[l];
+            const sep = SemiIdx(slot, pos[l]);
+            const p = parseDataPoint(std.mem.readInt(u64, slot.ptr[sep+1..][0..8], .little));
 
-            pword[l] = s.ptr + pos[l];
+            pword[l] = slot.ptr + pos[l];
             len[l] = sep - pos[l];
             word[l] = Table.prefixFast(pword[l], len[l]);
             temp[l] = p.temp;
@@ -311,7 +491,7 @@ inline fn worker(
 
             @prefetch( // Prefetch slot
                 &stations.slots[Table.hash(word[l], len[l]) >> (64 - TABLE_BITS)], 
-                .{ .rw = .write, .locality = 3, .cache = .data},
+                .{ .rw = .read, .locality = 3, .cache = .data},
             ); // hash is fused by LLVM, no redundant hashing with (below)record() -> find() -> hash()
         }
         // prefetch logical slot for each LANEs chunk[i]
@@ -322,11 +502,11 @@ inline fn worker(
     }
 
     inline for (0..LANES) |l| ParserTail(&stations, sub[l], pos[l]); // tail
-    out.* = stations; // worker return
+    out.* = stations;
 }
 
 // line is always []u8;?-?dd.d\n
-// merykitty's solution
+// merykitty'slot solution
 const MAGIC_MULTIPLIER: u64 = 100 * 0x1000000 + 10 * 0x10000 + 1; // 0x640A0001
 inline fn parseDataPoint(vec: u64) struct {
     temp: i32,
@@ -355,24 +535,22 @@ inline fn parseDataPoint(vec: u64) struct {
                                                                              //       
                                                                              // multiply creates junk
                                                                              // our value is somewhere in the middle bits
-                                                                             // value e[0;999] -> u10(1024)
+                                                                             // value group[0;999] -> u10(1024)
                                                                              // since aligned dot at byte 3 (big endian side) we have a u64 with top half occupied
                                                                              // >>32 shift value from top to bottom half, then 0x3FF(11 1111 1111; 10bit) select the value from it
     return .{ .temp = @intCast((real ^ sign) - sign), .len = (dot >> 3) + 3 };
 }
 
-pub fn flags(args: anytype, arena: std.mem.Allocator) !struct { // what is even the type Iterator
+pub fn flags(args: std.process.Args.Iterator) !struct {
     csv: []const u8,
     print: []const u8,
     threads: u32,
 } {
     var it = args;
     _ = it.next();
-    const arg = it.next() orelse "M";
-    const csv_size = if (arg.len > 0 and arg[0] == 'M') "100M" else "1B";
-    const csv = try std.fmt.allocPrint(arena, "../data/DB_{s}.txt", .{csv_size});
-    const print = it.next() orelse "";
+    const csv = it.next().?; // path
     const threads_arg = it.next() orelse "8";
+    const print = it.next() orelse "";
     const threads = try std.fmt.parseInt(u32, threads_arg, 10);
 
     return .{
@@ -382,9 +560,66 @@ pub fn flags(args: anytype, arena: std.mem.Allocator) !struct { // what is even 
     };
 }
 
+fn forkWorker() !i32 {
+    // HACK: push munmap latency out of the process latency
+    // real task would have been a infra, throughput doesn't take exit latency in count
+    var fds: [2]i32 = undefined;
+    if (std.os.linux.errno(std.os.linux.pipe(&fds)) != .SUCCESS) return error.PipeFailed;
+    const pid = std.os.linux.fork();
+    if (std.os.linux.errno(pid) != .SUCCESS) return error.ForkFailed;
+    if (pid == 0) return fds[1]; // worker
+  
+    _ = std.os.linux.close(fds[1]); // a dead worker gives EOF instead of hanging the parent
+    var done: [1]u8 = undefined;
+    const n = std.os.linux.read(fds[0], &done, 1);
+    std.os.linux.exit_group(if (n == 1) 0 else 1);
+}
+
+fn tscToMs(tsc: u64) f64 {
+    return @as(f64, @floatFromInt(tsc)) / TSC_GHZ / 1e6;
+}
+
+// marks: TSC at start, setup, parse, merge, print
+fn printMetrics(marks: [5]u64, busy_tsc: []u64, rows: u64, size: u64) void {
+    const total = marks[4] - marks[0];
+    const total_tsc: f64 = @floatFromInt(total);
+    const rows_f: f64 = @floatFromInt(rows);
+    const threads: f64 = @floatFromInt(busy_tsc.len);
+
+    std.mem.sort(u64, busy_tsc, {}, std.sort.asc(u64)); // reorders the caller's slice
+    const count = busy_tsc.len;
+    const busy_max: f64 = @floatFromInt(busy_tsc[count - 1]);
+    const busy_median = (@as(f64, @floatFromInt(busy_tsc[(count - 1) / 2])) +
+        @as(f64, @floatFromInt(busy_tsc[count / 2]))) / 2;
+
+    std.debug.print(
+        "\ntotal={d:.1}ms   setup={d:.1}ms   parse={d:.1}ms   merge={d:.1}ms   print={d:.1}ms\n",
+        .{
+            tscToMs(total),
+            tscToMs(marks[1] - marks[0]),
+            tscToMs(marks[2] - marks[1]),
+            tscToMs(marks[3] - marks[2]),
+            tscToMs(marks[4] - marks[3]),
+        },
+    );
+    std.debug.print(
+        "rows={d}   {d:.2} tsc/line   {d:.2} thread-ns/line   {d:.1}% imbalance   {d:.2} GB/s\n",
+        .{
+            rows,
+            total_tsc / rows_f,
+            tscToMs(total) * 1e6 * threads / rows_f,
+            (busy_max / busy_median - 1) * 100,
+            @as(f64, @floatFromInt(size)) * TSC_GHZ / total_tsc,
+        },
+    );
+}
+
 pub fn main(init: std.process.Init) !void {
+    const t1 = x86_64_tsc();
+    const done_fd = try forkWorker();
+
     // FLAGS
-    const args = try flags(init.minimal.args.iterate(), init.arena.allocator());
+    const args = try flags(init.minimal.args.iterate());
 
     // FILE
     const file = try std.Io.Dir.cwd().openFile(init.io, args.csv, .{});
@@ -402,10 +637,13 @@ pub fn main(init: std.process.Init) !void {
         file.handle,
         0,
     );
-    defer std.posix.munmap(whole);
+    //defer std.posix.munmap(whole);
+
+    const t_setup = x86_64_tsc();
 
     // Multi HOTPATH
     const handles = try init.arena.allocator().alloc(std.Thread, args.threads);
+    const busy_tsc = try init.arena.allocator().alloc(u64, args.threads);
 
     const arenas = try init.arena.allocator().alloc(std.heap.ArenaAllocator, args.threads);
     for (arenas) |*a| a.* = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -413,31 +651,30 @@ pub fn main(init: std.process.Init) !void {
 
     const results = try init.arena.allocator().alloc(Table, args.threads);
     for (0..args.threads) |t| {
-        const raw_start = chunk * t;
-        const raw_end = if (t == args.threads - 1) size else chunk * (t + 1);
-
-        const start = if (raw_start == 0 or whole[raw_start - 1] == '\n') raw_start else NLIdx(
-            whole,
-            raw_start,
-        ) + 1;
-
-        const end = if (raw_end == size) size else NLIdx(whole, raw_end - 1) + 1;
+        const start = lineStartAtOrAfter(whole, chunk * t);
+        const end = if (t == args.threads - 1) size else lineStartAtOrAfter(whole, chunk * (t + 1));
 
         handles[t] = try std.Thread.spawn(
             .{},
             worker,
-            .{ arenas[t].allocator(), whole[start..end], &results[t] },
+            .{ arenas[t].allocator(), whole[start..end], &results[t], &busy_tsc[t] },
         );
     }
     for (handles) |h| h.join();
+    const t_parse = x86_64_tsc();
 
     // MERGE
     var stations: Table = try .init(init.arena.allocator());
+    var rows: u64 = 0;
     for (results) |tlb| {
-        for (tlb.slots) |s| {
-            if (s.pword_len != 0) stations.fuse(s);
+        for (tlb.slots) |slot| {
+            if (slot.pword_len != 0) {
+                stations.fuse(slot);
+                rows += @intCast(slot.count);
+            }
         }
     }
+    const t_merge = x86_64_tsc();
 
     // PRINT
     if (std.mem.eql(u8, args.print, "p")) {
@@ -448,18 +685,18 @@ pub fn main(init: std.process.Init) !void {
         var max: i32 = std.math.minInt(i32);
         var stats: Stats = .{};
 
-        for (stations.slots) |s| {
-            if (s.pword_len == 0) continue;
-            name = s.pword[0..s.pword_len];
-            count = s.count;
-            sum = s.sum;
-            min = @min(min, s.min);
-            max = @max(max, s.max);
+        for (stations.slots) |slot| {
+            if (slot.pword_len == 0) continue;
+            name = slot.pword[0..slot.pword_len];
+            count = slot.count;
+            sum = slot.sum;
+            min = @min(min, slot.min);
+            max = @max(max, slot.max);
             
             if (comptime DEBUG) {
-                stats.probe_total+= s.stats.probe_total;
-                stats.probe_max = @max(stats.probe_max, s.stats.probe_max);
-                stats.lookup_count += s.stats.lookup_count;       
+                stats.probe_total+= slot.stats.probe_total;
+                stats.probe_max = @max(stats.probe_max, slot.stats.probe_max);
+                stats.lookup_count += slot.stats.lookup_count;       
             }
         }
         const avg: f64 = if (count != 0)
@@ -484,4 +721,10 @@ pub fn main(init: std.process.Init) !void {
         }
 
     }
+    const t_print = x86_64_tsc();
+    printMetrics(.{ t1, t_setup, t_parse, t_merge, t_print }, busy_tsc, rows, size);
+    
+    _ = std.os.linux.close(1);
+    _ = std.os.linux.close(2);
+    _ = std.os.linux.write(done_fd, "x", 1);
 }
