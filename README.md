@@ -1,14 +1,8 @@
 # 1BRC
-
-### Rules
-
-- No `stdout` of produced stats
-- Run: `sudo goset -n 1 -cgroup -steer -fence -interval 5`
-- Iterations: **>10**
-- Multithreading: 8 threads
+monitored with goset -n 8 -cgroup -steer -fence
 
 ### Perfomances (ms; 100M rows)
-| lang | med | sd | min | max | 1B(real) | link |
+| lang | med | sd | min | max | 1B (real) | link |
 |---|---|---|---|---|---|---|
 | **Zig** | 139.25 | 4.37 | 136.50 | 149.80 | 1307 (930)| [Zig](zig/README.md) | 
 
