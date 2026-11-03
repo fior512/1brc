@@ -8,7 +8,7 @@ monitored with goset -n 8 -cgroup -steer -fence
 
 > real: sched managed task, 12 threads.
 
-### Comparison (ms; 1B rows)
+### Comparison (ms; 1B rows; sched)
 | impl | official 1B| vs me | official 10k 1B | vs me | 1B synthetic | vs Zig |
 |---|---|---|---|---|---|---|
 | me Zig | 738 | | 1023 | | 893 | |
