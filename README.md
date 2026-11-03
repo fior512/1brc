@@ -10,7 +10,7 @@
 ### Perfomances (ms; 100M rows)
 | lang | med | sd | min | max | 1B(real) | link |
 |---|---|---|---|---|---|---|
-| **Zig** | 139.25 | 4.37 | 136.50 | 149.80 | 1.307s (0.930s)| [Zig](zig/README.md) | 
+| **Zig** | 139.25 | 4.37 | 136.50 | 149.80 | 1307 (930)| [Zig](zig/README.md) | 
 
 > real: sched managed task, 12 threads.
 
