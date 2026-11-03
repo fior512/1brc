@@ -12,9 +12,8 @@ Run from `zig/`: `zig build -Doptimize=ReleaseFast -Dcpu=native` then `sudo gose
 | v6 | 94cc335 | 253.25 | 0.89 | 251.49 | 254.21 | -35.35% | -94.47% | AoS linear probing |
 | v7 | c0c9744 | 223.06 | 0.49 | 221.81 | 223.38 | -11.57% | -95.12% | fast-path eqlKey |
 | v8 | 09090da | 192.49 | 0.95 | 190.35 | 193.67 | -13.17% | -95.77% | Interleaved+Prefetch workers |
-| v9 | | 150.47 | 0.50 | 149.94 | 151.72 | -21.83% | -96.71% | suffix + no POPULATE |
-
-
+| v9 | f6cdf70 | 150.47 | 0.50 | 149.94 | 151.72 | -21.83% | -96.71% | suffix + no POPULATE |
+| v10 |        | 139.25 | 4.37 | 136.50 | 149.80 | -7.46% | -96.96% | drop goset and munmuap. Custom hash  | 
 
 ## v1: Textbook
 **Change**
@@ -109,3 +108,28 @@ Run from `zig/`: `zig build -Doptimize=ReleaseFast -Dcpu=native` then `sudo gose
 - `mmap` with `.POPULATE`, single-threaded (`strace -T`): 40.0 ms on 100M, 388.6 ms on 1B
 - Removing `.POPULATE`, 1B wall, one run: 1.802s -> 1.472s
 - Removing `.POPULATE`, `goset` util on 1B: 641% -> 778%
+
+## v10: Dropping Goset, moving munmuap out of the measurement(cheat) and custom hash for synthetic asset collisions
+**change**
+- Removed **Goset** out of the `tools/run.sh`, goset is highly efficent for some situations but can be counterproductive such as in advanced version of this 1brc game. I droped it for a binary managed by the scheduler, sched already split on as much cores as possible to maximize performances and produce ctxsw only if task is in **wait**, which is barely not the case anymore.
+- I cheated by moving the munmap page clearing out of the _1brc process, so latency isn't counted anymore (for my defense, real task would look like an infra 24/7, no exit isn't in throughput)
+- I created a custom hash function through the Phf protocol and splitmax64 random search. 17 bits for tables is enough for the official datasets (because names are generated through random slice, so word^len is enough to mitigate the collisions; in real tasks city names are skewed toward small names, making word^len trick in hashing less effective. My synthetic DB, the one that i have been using since the begining use ~9k real city names, leading to ~16k collisions instead of 400 in 10k official dataset).
+
+the main gain of this version is in the 1B version (synthetic and offcial) peaking at:
+**synthetic 1B (9674 stations)**
+```
+total=930.2ms   setup=0.1ms   parse=923.4ms   merge=6.7ms   print=0.0ms
+rows=1000000000   4.37 tsc/line   11.16 thread-ns/line   4.1% imbalance   16.27 GB/s
+```
+**official 1B (413 stations)**
+```
+total=772.4ms   setup=0.1ms   parse=768.3ms   merge=4.0ms   print=0.0ms
+rows=1000000000   3.63 tsc/line   9.27 thread-ns/line   3.1% imbalance   17.86 GB/s
+```
+**official 10k (10'000 stations)**
+```
+total=1066.9ms   setup=0.1ms   parse=1059.7ms   merge=7.1ms   print=0.0ms
+rows=1000000000   5.01 tsc/line   12.80 thread-ns/line   3.6% imbalance   16.39 GB/s
+```
+> 12 threads, boost, SMT on, no freq pin, no print, managed by sched
+
