@@ -15,6 +15,7 @@ Run from `zig/`: `zig build -Doptimize=ReleaseFast -Dcpu=native` then `sudo gose
 | v9 | f6cdf70 | 150.47 | 0.50 | 149.94 | 151.72 | -21.83% | -96.71% | suffix + no POPULATE |
 | v10 |        | 139.25 | 4.37 | 136.50 | 149.80 | -7.46% | -96.96% | drop goset and munmuap. Custom hash  | 
 
+
 ## v1: Textbook
 **Change**
 - Single SIMD vector (`@Vector(32, u8)`) over the line tail to find `;` (line is >100 bytes)
