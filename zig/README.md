@@ -117,6 +117,7 @@ Run from `zig/`: `zig build -Doptimize=ReleaseFast -Dcpu=native` then `sudo gose
 - I created a custom hash function through the Phf protocol and splitmax64 random search. 17 bits for tables is enough for the official datasets (because names are generated through random slice, so word^len is enough to mitigate the collisions; in real tasks city names are skewed toward small names, making word^len trick in hashing less effective. My synthetic DB, the one that i have been using since the begining use ~9k real city names, leading to ~16k collisions instead of 400 in 10k official dataset).
 
 the main gain of this version is in the 1B version (synthetic and offcial) peaking at:
+
 **synthetic 1B (9674 stations)**
 ```
 total=930.2ms   setup=0.1ms   parse=923.4ms   merge=6.7ms   print=0.0ms
