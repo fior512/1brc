@@ -1,10 +1,12 @@
 # 1BRC
-monitored with goset -n 8 -cgroup -steer -fence and scheduler managed MAX(12) threads
+bare binary managed by the scheduler, 12 threads
 
 ### Perfomances (ms; 100M rows)
 | lang | med | sd | min | max | 1B(12T) | link |
 |---|---|---|---|---|---|---|
-| **Zig** | 139.25 | 4.37 | 136.50 | 149.80 | 1307 (930)| [Zig](zig/README.md) | 
+| **Zig** | 103.30 | 8.19 | 101.60 | 123.20 | 762 | [Zig](zig/README.md) |
+
+> 100M: `synthetic_100M.txt` (9674 stations). 1B: `DB_1B.txt` (official, 413 stations).
 
 ### Ladder (ms; 1B rows; median of 3; 12T; rank in column)
 | lang | impl | official rank | official 1B | official 10k | synthetic |
