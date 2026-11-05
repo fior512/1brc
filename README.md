@@ -26,18 +26,11 @@ monitored with goset -n 8 -cgroup -steer -fence and scheduler managed MAX(12) th
 | Java | jincongho | #25 | 1782 | 10679 | 3989 | 2149 | 10753 | 7055 |
 | Java | gamlerhart | #30 | 2653 | 12307 | timeout | 4884 | 11759 | timeout |
 
-> AMD Ryzen 5 7600X 6-Core Processor
+> AMD Ryzen 5 7600X 6-Core Processor\
+> official ladder: [Java leaderboard](https://github.com/gunnarmorling/1brc)\
+> `wrong`: incorrect values on synthetic. `timeout`: killed at 180s on all 6 runs.
 
-> official ladder: [Java leaderboard](https://github.com/gunnarmorling/1brc)
-
-> wrong: incorrect values on synthetic. 
-
-> timeout: killed at 180s on all 6 runs.
-
-
-Official 1B:  413 stations (real name), 1B rows
-
-Official 10k: 10k stations (rnd slice mix), 1B rows
-
-Synthetic:   9674 stations (real name), 1B rows
+Official 1B:  413 stations (real name), 1B rows.\
+Official 10k: 10k stations (rnd slice mix), 1B rows.\
+Synthetic:   9674 stations (real name), 1B rows.
 
