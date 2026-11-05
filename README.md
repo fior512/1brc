@@ -8,61 +8,36 @@
 - Multithreading: 8 threads
 
 ### Perfomances (ms; 100M rows)
-| lang | med | sd | min | max | 1B(real) | link |
+| lang | med | sd | min | max | 1B(12T) | link |
 |---|---|---|---|---|---|---|
 | **Zig** | 139.25 | 4.37 | 136.50 | 149.80 | 1307 (930)| [Zig](zig/README.md) | 
 
-> real: sched managed task, 12 threads.
 
-### Comparison (ms; 1B rows)
-| impl | official 1B| vs me | official 10k 1B | vs me | 1B synthetic | vs Zig |
-|---|---|---|---|---|---|---|
-| me Zig | 738 | | 1023 | | 893 | |
-| [lehuyduc](https://github.com/lehuyduc/1brc-simd) C++ | 641 | -13.1% | 926 | -9.5% | 824 | -7.8% |
-| [austindonisan](https://github.com/austindonisan/1brc) C | 325 | -56.0% | 913 | -10.8% | 627 | -29.8% |
+### Ladder (ms; 1B rows; median of 3)
+| lang | impl | official rank | official 1B 12T | official 10k 12T | synthetic 12T | official 1B 8T | official 10k 8T | synthetic 8T |
+|---|---|---|---|---|---|---|---|---|
+| C | [austindonisan](https://github.com/austindonisan/1brc) | - | 334 | 891 | 612 | 479 | 966 | 765 |
+| C++ | [lehuyduc](https://github.com/lehuyduc/1brc-simd) | - | 672 | 931 | 834 | 894 | 1235 | 1126 |
+| Java | artsiomkorzun | #2 | 697 | 1168 | 977 | 740 | 1355 | 1101 |
+| Java | jerrinot | #3 | 720 | 1488 | 1306 | 818 | 1773 | 1568 |
+| Java | thomaswue | #1 | 738 | 2102 | 1445 | 792 | 2261 | 1516 |
+| Zig | **me** | - | **761** | **1037** | **901** | **960** | **1317** | **1155** |
+| Java | abeobk | #5 | 780 | 2280 | 1255 | 926 | 2789 | 1421 |
+| Java | royvanrijn | #7 | 847 | 1545 | 1258 | 1166 | 1920 | 1431 |
+| Java | stephenvonworley | #6 | 867 | 1278 | 1167 | 1050 | 1516 | 1390 |
+| Java | mtopolnik | #9 | 883 | 1228 | wrong (1187) | 1193 | 1649 | wrong (1551) |
+| Java | serkan-ozal | #4 | 890 | 3736 | wrong (1461) | 1021 | 3686 | wrong (1542) |
+| Java | merykittyunsafe | #10 | 1053 | 3788 | 1591 | 1168 | 4923 | 1761 |
+| Java | gonix | #15 | 1202 | 2002 | 1855 | 1552 | 2398 | 2335 |
+| Java | ebarlas | #20 | 1327 | 2294 | 1999 | 1772 | 2926 | 2545 |
+| Java | jincongho | #25 | 1782 | 10679 | 3989 | 2149 | 10753 | 7055 |
+| Java | gamlerhart | #30 | 2653 | 12307 | timeout | 4884 | 11759 | timeout |
 
+> AMD Ryzen 5 7600X 6-Core Processor
+> official ladder: [Java leaderboard](https://github.com/gunnarmorling/1brc)
+> wrong: incorrect values on synthetic. 
+> timeout: killed at 180s on all 6 runs.
 
-### Outputs
-**synthetic 1B, 8 threads, goset**
-
-```zig
-total=1306.2ms   setup=0.1ms   parse=1301.2ms   merge=4.9ms   print=0.0ms
-rows=1000000000   6.14 tsc/line   10.45 thread-ns/line   0.5% imbalance   11.58 GB/s
-
-
------------------ GOSET -----------------
-Selection
-  cpu  sel  steer  non-steer  core  sibl  isol  numa  nohz  rcu
-    8   *       0          2    60     2           0
-    2   *       0         58    60     8           0
-    7   *       0         33   101     1           0
-    1   *       0         68   101     7           0
-    4   *       0         64   266    10           0
-   10   *     332        202   266     4           0
-    5   *       0         60   394    11           0
-   11   *       0        334   394     5           0
-    6   &       0         26   459     0           0
-    0           0        433   459     6           0
-    3           4        299   688     9           0
-    9           1        389   688     3           0
-
-Telemetry
-  cpu  freq min  freq avg  freq max  throttle count  irq steerable  irq non-steerable
-  1     2.99GHz   4.96GHz   5.16GHz               0              0                555
-  2     3.23GHz   4.96GHz   5.16GHz               0              0                543
-  4     3.77GHz   4.96GHz   5.16GHz               0              0                588
-  5     2.99GHz   4.96GHz   5.16GHz               0              0                533
-  7     2.99GHz   4.95GHz   5.16GHz               0              0                545
-  8     2.99GHz   4.96GHz   5.16GHz               0              0                547
-  10    3.79GHz   4.96GHz   5.16GHz               0              0                529
-  11    3.31GHz   4.96GHz   5.16GHz               0              0                515
-  all   2.99GHz   4.96GHz   5.16GHz               0              0              4.36k
-
-Run
-  task            sched             steer
-  poll  1301@1ms  ctxsw vol      2  applied         40
-  wall    1.307s  ctxsw invol    0  rejected        26
-  util        0%  migrations     0  remaining        0
-  exit         0  run_delay    0ns  drift            0
-                                    irqbalance  absent
-```
+Official 1B:  413 stations (real name), 1B rows
+Official 10k: 10k stations (rnd slice mix), 1B rows
+Synthetic:   9674 stations (real name), 1B rows

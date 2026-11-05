@@ -30,7 +30,7 @@ fn x86_64_tsc() u64 {
 
 const DEBUG = false; // probe telemetry
 const TSC_GHZ = 4.7; // 7600X
-const V = 32; // bytes (AVX)
+const V = 32; // bytes (AVX), 64 better for 10k
 const LANES = 2; //v8:  1: 64.3B cycles; 2: 49.7B cycles; 3: 49.6B; 4: 58.8B cycles
 const TABLE_BITS = 17; //v9: 15: 950ms; 17: 900ms
 const TABLE_SLOTS = 1 << TABLE_BITS;
@@ -210,7 +210,6 @@ const Table = struct {
         //      So custom hashing was necessary for me, i now use my custom version without the shifts because it still handles better the official 1B.
         //
         //
-
         // TABLE_BITS = 17
         // (word ^ len) *% MAGIC
         // 1B
@@ -222,7 +221,7 @@ const Table = struct {
         //      0x63CBE1E459320DD7: probe_total=124548, probe_max=4, lookup_count=120000; 4548 collisions
         //
         //
-        //  collisions are summed, so avg: x/threads ~= 400 per threads; 95% are fine
+        //  collisions are summed, so x/threads ~= 400; 95% are fine
         //  i can make it drop to 0 by adding shift, but not worth the home() logic per hash
         //
         //  0x63CBE1E459320DD7 have been generated for the synthetic dataset, not the official
