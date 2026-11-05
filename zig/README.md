@@ -1,19 +1,21 @@
 # Zig
 
-Run from `zig/`: `zig build -Doptimize=ReleaseFast -Dcpu=native` then `sudo goset -n 8 -cgroup -fence -steer --interval 1 -- ./zig-out/bin/_1brc B "" 8`
+Run from `zig/`: `zig build -Doptimize=ReleaseFast -Dcpu=native` then `./zig-out/bin/_1brc ../data/synthetic_100M.txt 12 ""` (100M) or `./zig-out/bin/_1brc ../data/DB_1B.txt 12 ""` (1B)
 ## Summary (ms, 100M rows)
-| ver | commit | med | sd | min | max | vs prev | vs v1 | aspects |
-|---|---|---|---|---|---|---|---|---|
-| v1 | 6949426 | 4580.00 | 35.98 | 4550.00 | 4660.00 | - | - | textbook |
-| v2 | 7f14c3f | 3995.00 | 48.41 | 3940.00 | 4060.00 | -12.8% | -12.8% | mmap + SIMD `\n` |
-| v3 | e038fed | 2895.00 | 31.00 | 2830.00 | 2920.00 | -27.5% | -36.8% | fixed-point parse |
-| v4 | 95f2118 | 1530.00 | 12.65 | 1500.00 | 1540.00 | -47.2% | -66.6% | merykitty's SWAR |
-| v5 | 362acff | 391.74 | 9.14 | 387.31 | 419.07 | -74.40% | -91.45% | threadpool |
-| v6 | 94cc335 | 253.25 | 0.89 | 251.49 | 254.21 | -35.35% | -94.47% | AoS linear probing |
-| v7 | c0c9744 | 223.06 | 0.49 | 221.81 | 223.38 | -11.57% | -95.12% | fast-path eqlKey |
-| v8 | 09090da | 192.49 | 0.95 | 190.35 | 193.67 | -13.17% | -95.77% | Interleaved+Prefetch workers |
-| v9 | f6cdf70 | 150.47 | 0.50 | 149.94 | 151.72 | -21.83% | -96.71% | suffix + no POPULATE |
-| v10 | e9a0d01 | 139.25 | 4.37 | 136.50 | 149.80 | -7.46% | -96.96% | skip munmuap + custom hash  | 
+| ver | commit | threads | med | sd | min | max | vs prev | vs v1 | 1B | aspects |
+|---|---|--:|--:|--:|--:|--:|--:|--:|--:|---|
+| v1 | 6949426 | 1 | 4714.00 | 16.78 | 4698.00 | 4759.00 | - | - | 37688 | textbook |
+| v2 | 7f14c3f | 1 | 3909.00 | 23.13 | 3885.00 | 3954.00 | -17.08% | -17.08% | 29597 | mmap + SIMD `\n` |
+| v3 | e038fed | 1 | 2833.00 | 17.09 | 2803.00 | 2854.00 | -27.53% | -39.90% | 21941 | fixed-point parse |
+| v4 | 95f2118 | 1 | 1727.50 | 6.49 | 1718.00 | 1737.00 | -39.02% | -63.35% | 12934 | merykitty's SWAR |
+| v5 | 362acff | 12 | 277.00 | 6.90 | 272.00 | 297.00 | -83.97% | -94.12% | 2140 | threadpool |
+| v6 | 94cc335 | 12 | 198.50 | 1.10 | 196.00 | 199.00 | -28.34% | -95.79% | 1313 | AoS linear probing |
+| v7 | c0c9744 | 12 | 189.50 | 1.34 | 188.00 | 192.00 | -4.53% | -95.98% | 1304 | fast-path eqlKey |
+| v8 | 09090da | 12 | 158.00 | 6.86 | 157.00 | 176.00 | -16.62% | -96.65% | 1091 | Interleaved+Prefetch workers |
+| v9 | f6cdf70 | 12 | 113.00 | 0.57 | 112.00 | 114.00 | -28.48% | -97.60% | 766 | suffix + no POPULATE |
+| v10 | e9a0d01 | 12 | 103.30 | 8.19 | 101.60 | 123.20 | -8.58% | -97.81% | 762 | skip munmuap + custom hash |
+
+> Bare binary managed by sched. med/sd/min/max: 10 runs on `synthetic_100M.txt` (9674 stations). 1B: one run on `DB_1B.txt` (official, 413 stations).\
 
 
 ## v1: Textbook
