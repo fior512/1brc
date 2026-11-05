@@ -15,7 +15,7 @@ Run from `zig/`: `zig build -Doptimize=ReleaseFast -Dcpu=native` then `./zig-out
 | v9 | f6cdf70 | 12 | 113.00 | 0.57 | 112.00 | 114.00 | -28.48% | -97.60% | 766 | suffix + no POPULATE |
 | v10 | e9a0d01 | 12 | 103.30 | 8.19 | 101.60 | 123.20 | -8.58% | -97.81% | 762 | skip munmuap + custom hash |
 
-> Bare binary managed by sched. med/sd/min/max: 10 runs on `synthetic_100M.txt` (9674 stations). 1B: one run on `DB_1B.txt` (official, 413 stations).\
+> Bare binary managed by sched. med/sd/min/max: 10 runs on `synthetic_100M.txt` (9674 stations). 1B: one run on `DB_1B.txt` (official, 413 stations).
 
 
 ## v1: Textbook
