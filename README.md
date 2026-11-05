@@ -11,9 +11,9 @@ monitored with goset -n 8 -cgroup -steer -fence and scheduler managed MAX(12) th
 |---|---|---|---|---|---|---|---|---|
 | C | [austindonisan](https://github.com/austindonisan/1brc) | - | 334 | 891 | 612 | 479 | 966 | 765 |
 | C++ | [lehuyduc](https://github.com/lehuyduc/1brc-simd) | - | 672 | 931 | 834 | 894 | 1235 | 1126 |
-| Java | artsiomkorzun | #2 | 697 | 1168 | 977 | 740 | 1355 | 1101 |
+| Java | [artsiomkorzun](https://github.com/artsiomkorzun/1brc-walkthrough) | #2 | 697 | 1168 | 977 | 740 | 1355 | 1101 |
 | Java | jerrinot | #3 | 720 | 1488 | 1306 | 818 | 1773 | 1568 |
-| Java | thomaswue | #1 | 738 | 2102 | 1445 | 792 | 2261 | 1516 |
+| Java | [thomaswue](https://github.com/thomaswue/1brc-steps) | #1 | 738 | 2102 | 1445 | 792 | 2261 | 1516 |
 | Zig | **me** | - | **761** | **1037** | **901** | **960** | **1317** | **1155** |
 | Java | abeobk | #5 | 780 | 2280 | 1255 | 926 | 2789 | 1421 |
 | Java | royvanrijn | #7 | 847 | 1545 | 1258 | 1166 | 1920 | 1431 |
