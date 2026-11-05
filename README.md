@@ -1,5 +1,5 @@
 # 1BRC
-bare binary managed by the scheduler, 12 threads, no goset
+bare binary managed by the scheduler, 12 threads
 
 ### Perfomances (ms; 100M rows)
 | lang | med | sd | min | max | 1B(12T) | link |
