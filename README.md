@@ -7,7 +7,7 @@ monitored with goset -n 8 -cgroup -steer -fence and scheduler managed MAX(12) th
 | **Zig** | 139.25 | 4.37 | 136.50 | 149.80 | 1307 (930)| [Zig](zig/README.md) | 
 
 ### Ladder (ms; 1B rows; median of 3; 12T; rank in column)
-| lang | impl | 1BRC # | official 1B | official 10k | synthetic |
+| lang | impl | official rank | official 1B | official 10k | synthetic |
 |---|---|--:|--:|--:|--:|
 | C | [austindonisan](https://github.com/austindonisan/1brc) | - | 334 (1) | 891 (1) | 612 (1) |
 | C++ | [lehuyduc](https://github.com/lehuyduc/1brc-simd) | - | 672 (2) | 931 (2) | 834 (2) |
