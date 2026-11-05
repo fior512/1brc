@@ -1,5 +1,5 @@
 # 1BRC
-monitored with goset -n 8 -cgroup -steer -fence
+monitored with goset -n 8 -cgroup -steer -fence and scheduler managed MAX(12) threads
 
 ### Perfomances (ms; 100M rows)
 | lang | med | sd | min | max | 1B(12T) | link |
@@ -27,10 +27,17 @@ monitored with goset -n 8 -cgroup -steer -fence
 | Java | gamlerhart | #30 | 2653 | 12307 | timeout | 4884 | 11759 | timeout |
 
 > AMD Ryzen 5 7600X 6-Core Processor
+
 > official ladder: [Java leaderboard](https://github.com/gunnarmorling/1brc)
+
 > wrong: incorrect values on synthetic. 
+
 > timeout: killed at 180s on all 6 runs.
 
+
 Official 1B:  413 stations (real name), 1B rows
+
 Official 10k: 10k stations (rnd slice mix), 1B rows
+
 Synthetic:   9674 stations (real name), 1B rows
+
