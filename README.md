@@ -8,7 +8,7 @@ bare binary managed by the scheduler, 12 threads
 
 > 100M: `synthetic_100M.txt` (9674 stations). 1B: `DB_1B.txt` (official, 413 stations).
 
-### Ladder (ms; 1B rows; median of 3; 12T; rank in column)
+### Ladder (ms; 1B rows; 12T; rank in column)
 | lang | impl | official rank | official 1B | official 10k | synthetic |
 |---|---|--:|--:|--:|--:|
 | C | [austindonisan](https://github.com/austindonisan/1brc) | - | 334 (1) | 891 (1) | 612 (1) |
