@@ -14,7 +14,7 @@ monitored with goset -n 8 -cgroup -steer -fence and scheduler managed MAX(12) th
 | Java | [artsiomkorzun](https://github.com/artsiomkorzun/1brc-walkthrough) | #2 | 697 | 1168 | 977 | 740 | 1355 | 1101 |
 | Java | jerrinot | #3 | 720 | 1488 | 1306 | 818 | 1773 | 1568 |
 | Java | [thomaswue](https://github.com/thomaswue/1brc-steps) | #1 | 738 | 2102 | 1445 | 792 | 2261 | 1516 |
-| Zig | **me** | - | **761** | **1037** | **901** | **960** | **1317** | **1155** |
+| Zig | **fior512** (me) | - | **761** | **1037** | **901** | **960** | **1317** | **1155** |
 | Java | abeobk | #5 | 780 | 2280 | 1255 | 926 | 2789 | 1421 |
 | Java | royvanrijn | #7 | 847 | 1545 | 1258 | 1166 | 1920 | 1431 |
 | Java | stephenvonworley | #6 | 867 | 1278 | 1167 | 1050 | 1516 | 1390 |
